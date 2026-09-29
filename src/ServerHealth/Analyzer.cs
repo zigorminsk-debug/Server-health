@@ -237,10 +237,10 @@ public static class Analyzer
         cpuScore = ClampScore(cpuScore); ramScore = ClampScore(ramScore);
         diskScore = ClampScore(diskScore); netScore = ClampScore(netScore);
 
-        r.Scores.Add(new KeyValuePair<string, int>("CPU (процессор)", cpuScore));
-        r.Scores.Add(new KeyValuePair<string, int>("RAM (память)", ramScore));
-        r.Scores.Add(new KeyValuePair<string, int>("Disk (диски)", diskScore));
-        r.Scores.Add(new KeyValuePair<string, int>("Net (сеть)", netScore));
+        r.Scores.Add(new KeyValuePair<string, int>("CPU (процессор)", (int)cpuScore));
+        r.Scores.Add(new KeyValuePair<string, int>("RAM (память)", (int)ramScore));
+        r.Scores.Add(new KeyValuePair<string, int>("Disk (диски)", (int)diskScore));
+        r.Scores.Add(new KeyValuePair<string, int>("Net (сеть)", (int)netScore));
 
         // ================================================================ ПРАВИЛА
         // ---------------- CPU ----------------
