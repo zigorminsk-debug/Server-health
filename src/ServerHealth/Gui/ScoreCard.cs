@@ -71,7 +71,7 @@ public sealed class ScoreCard : Panel
         return pad / 2 + TitleH + gap + BigH + gap + barH + gap + CapH + pad;
     }
 
-    protected override Size GetPreferredSize(Size proposed)
+    public override Size GetPreferredSize(Size proposed)
     {
         return new Size(140, NeededHeight());
     }
