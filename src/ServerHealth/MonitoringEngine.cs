@@ -73,6 +73,8 @@ public sealed class MonitoringEngine : IDisposable
     public DateTime NextReportAt { get; private set; }
     public CycleResult? Last { get; private set; }
     public string OutRoot { get; private set; }
+    /// <summary>Путь к постоянному дашборду (dashboard.html — всегда последний цикл).</summary>
+    public string? DashboardPath { get; private set; }
 
     public event Action<LivePoint>? Tick;
     public event Action<CycleResult>? CycleCompleted;
@@ -200,6 +202,8 @@ public sealed class MonitoringEngine : IDisposable
                 Last = cycle;
                 ReportsDone++;
                 Log?.Invoke($"Отчёт #{cycle.CycleNumber} готов: {cycle.Dir}");
+                if (DashboardPath != null)
+                    Log?.Invoke("Дашборд (браузер): " + DashboardPath);
                 Log?.Invoke("Вердикт: " + cycle.VerdictTitle);
                 try { CycleCompleted?.Invoke(cycle); } catch { }
                 if (cycle.HasCritical)
@@ -373,6 +377,21 @@ public sealed class MonitoringEngine : IDisposable
         string dir = Path.Combine(OutRoot, "ServerHealth_" + Sys.CollectedStart.ToString("yyyyMMdd_HHmmss"));
         var written = ReportWriter.Write(dir, Sys, samples, agg, evGroups, sessions, tcpSummary,
             openFilesSummary, analysis, duration, "", writeJson: true, htmlRefreshSec: _o.HtmlRefreshSec);
+        if (ReportWriter.LastHtmlError != null)
+            Log?.Invoke("report.html: ошибка генерации — " + ReportWriter.LastHtmlError);
+
+        // постоянный дашборд: одна страница в корне отчётов, всегда показывает
+        // последний цикл и сама обновляется в браузере (meta refresh)
+        try
+        {
+            DashboardPath = Path.Combine(OutRoot, "dashboard.html");
+            ReportHtml.Write(DashboardPath, Sys, samples, agg, evGroups, tcpSummary, openFilesSummary,
+                analysis, duration, written, Math.Max(15, _o.HtmlRefreshSec));
+        }
+        catch (Exception ex)
+        {
+            Log?.Invoke("dashboard.html: " + ex.Message);
+        }
 
         return new CycleResult
         {

@@ -177,7 +177,7 @@ public sealed class MainForm : Form
         _btnStop = FlatBtn("⏸  Остановить", Color.FromArgb(88, 88, 112), 34);
         _btnStop.Enabled = false;
         _btnStop.Click += (s, e) => StopMonitoring();
-        _btnReport = FlatBtn("🌐  Открыть последний отчёт", Color.FromArgb(52, 52, 76), 30);
+        _btnReport = FlatBtn("🌐  Открыть веб-отчёт (браузер)", Color.FromArgb(52, 52, 76), 30);
         _btnReport.Enabled = false;
         _btnReport.Click += (s, e) => OpenLastReport();
         _btnFolder = FlatBtn("📂  Папка отчётов", Color.FromArgb(52, 52, 76), 30);
@@ -638,7 +638,7 @@ public sealed class MainForm : Form
             EventsHours = _cli.EventsHours > 0 ? _cli.EventsHours : 24,
             OutRoot = string.IsNullOrWhiteSpace(_cli.OutDir) ? "" : _cli.OutDir,
             KeepReports = (int)_numKeep.Value,
-            HtmlRefreshSec = 60
+            HtmlRefreshSec = 30
         };
         _engine = new MonitoringEngine(opts);
         _engine.Log += m => BeginInvoke(new Action(() => AppendLog(m)));
@@ -679,14 +679,17 @@ public sealed class MainForm : Form
 
     private void OpenLastReport()
     {
-        var last = _engine?.Last;
-        if (last?.Files == null || !File.Exists(last.Files.Html))
+        // приоритет: постоянный дашборд (самообновляется), иначе отчёт последнего цикла
+        string? path = _engine?.DashboardPath;
+        if (path == null || !File.Exists(path))
+            path = _engine?.Last?.Files?.Html;
+        if (path == null || !File.Exists(path))
         {
             MessageBox.Show("Отчёт ещё не сформирован — дождитесь окончания первого цикла.", "ServerHealth",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
-        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(last.Files.Html) { UseShellExecute = true }); }
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true }); }
         catch (Exception ex) { MessageBox.Show("Не удалось открыть: " + ex.Message); }
     }
 
@@ -761,10 +764,15 @@ public sealed class MainForm : Form
                 p.HungCount > 0 ? "ДА (" + p.HungCount + ")" : "");
         _btnReport.Enabled = r.Files != null;
         AppendLog("Готов отчёт #" + r.CycleNumber + ": " + r.Dir);
-        if (_chkOpen.Checked && r.Files != null && File.Exists(r.Files.Html))
+        if (_chkOpen.Checked)
         {
-            try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(r.Files.Html) { UseShellExecute = true }); }
-            catch { }
+            string? toOpen = _engine?.DashboardPath;
+            if (toOpen == null || !File.Exists(toOpen)) toOpen = r.Files?.Html;
+            if (toOpen != null && File.Exists(toOpen))
+            {
+                try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(toOpen) { UseShellExecute = true }); }
+                catch { }
+            }
         }
     }
 

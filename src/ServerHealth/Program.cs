@@ -108,12 +108,20 @@ internal static class Program
             Console.WriteLine();
             Console.WriteLine("════════ ОТЧЁТ #" + r.CycleNumber + " ════════");
             Console.WriteLine("  Каталог : " + r.Dir);
-            Console.WriteLine("  Веб     : " + Path.Combine(r.Dir, "report.html"));
+            Console.WriteLine("  Веб     : " + (engine.DashboardPath ?? Path.Combine(r.Dir, "report.html")) +
+                              (opt.NoOpen ? "" : "  (открыт в браузере, обновляется сам)"));
             Console.WriteLine("  Вердикт : " + r.VerdictTitle);
             if (r.Analysis != null)
-                foreach (var s in r.Analysis.Scores)
-                    Console.WriteLine(string.Format("  {0,-18} {1,3}/100", s.Key, s.Value));
+                foreach (var sc in r.Analysis.Scores)
+                    Console.WriteLine(string.Format("  {0,-18} {1,3}/100", sc.Key, sc.Value));
             Console.WriteLine();
+
+            // автооткрытие веб-отчёта в браузере (одна страница-дашборд на всё время работы)
+            if (!opt.NoOpen && engine.DashboardPath != null && File.Exists(engine.DashboardPath))
+            {
+                try { Process.Start(new ProcessStartInfo(engine.DashboardPath) { UseShellExecute = true }); }
+                catch { }
+            }
         };
 
         Console.CancelKeyPress += (s, e) => { e.Cancel = true; engine.Stop(); };

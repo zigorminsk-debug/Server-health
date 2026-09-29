@@ -8,6 +8,9 @@ namespace ServerHealth;
 /// <summary>Формирование файлов отчёта: report.txt, report.json, samples.csv, processes.csv, events.csv.</summary>
 public static class ReportWriter
 {
+    /// <summary>Последняя ошибка генерации report.html (null — успех).</summary>
+    public static string? LastHtmlError;
+
     public sealed class Paths
     {
         public string Txt, Html, Json, Samples, Processes, Events, Dir;
@@ -42,12 +45,17 @@ public static class ReportWriter
         WriteEventsCsv(paths.Events, events);
         if (writeJson)
             WriteJson(paths.Json, sys, samples, procs, events, sessions, tcp, openFiles, analysis, duration);
+        WriteTxt(paths.Txt, sys, samples, procs, events, sessions, tcp, openFiles, analysis, duration, knownProcsNote);
+        // HTML формируем последним; ошибка не теряется молча — попадает в LastHtmlError и журнал
         try
         {
             ReportHtml.Write(paths.Html, sys, samples, procs, events, tcp, openFiles, analysis, duration, paths, htmlRefreshSec);
+            LastHtmlError = null;
         }
-        catch { /* HTML не критичен: TXT/CSV уже записаны */ }
-        WriteTxt(paths.Txt, sys, samples, procs, events, sessions, tcp, openFiles, analysis, duration, knownProcsNote);
+        catch (Exception ex)
+        {
+            LastHtmlError = ex.Message;
+        }
         return paths;
     }
 
