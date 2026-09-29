@@ -14,6 +14,9 @@ public sealed class LivePoint
     public double NetMbps;
     public double DiskLatMaxMs;
     public double DiskQueueAvg;
+    public double DiskQueueMax;   // макс. текущая очередь по дискам
+    public double DiskBusyPct;    // макс. занятость диска, % (100 - % Idle Time)
+    public double DiskMbps;       // суммарный поток чтение+запись, Мбит/с
     public int TcpEst;
     public double ProcQueue;
 }
@@ -129,6 +132,32 @@ public sealed class MonitoringEngine : IDisposable
             sys.RamGb = mem.total / 1073741824.0;
             var pf = Native.RegGetMultiString(@"SYSTEM\CurrentControlSet\Session Manager\Memory Management", "PagingFiles");
             sys.PageFileConfig = pf.Count == 0 ? "не задан" : string.Join("; ", pf);
+
+            // платформа виртуализации (важно для трактовки дисковых метрик):
+            // в гостевой ОС видно только I/O этой ВМ, нагрузка на хранилище — на гипервизоре
+            string sm = Native.RegGetString(@"HARDWARE\DESCRIPTION\System\BIOS", "SystemManufacturer");
+            string sp = Native.RegGetString(@"HARDWARE\DESCRIPTION\System\BIOS", "SystemProductName");
+            string sv = Native.RegGetString(@"HARDWARE\DESCRIPTION\System\BIOS", "BIOSVendor");
+            string hw = (sm + " " + sp + " " + sv).ToLowerInvariant();
+            if (hw.Contains("vmware")) sys.Virt = "VMware (ESXi/vSphere)";
+            else if (hw.Contains("virtual machine") || hw.Contains("hyper-v")) sys.Virt = "Microsoft Hyper-V";
+            else if (hw.Contains("xen")) sys.Virt = "Citrix Xen";
+            else if (hw.Contains("kvm") || hw.Contains("qemu")) sys.Virt = "KVM/QEMU";
+            else if (hw.Contains("virtualbox") || hw.Contains("innotek")) sys.Virt = "Oracle VirtualBox";
+
+            // тип гостевого дискового контроллера — влияет на очереди и рекомендации
+            foreach (var (svc, label) in new[]
+            {
+                ("pvscsi", "PVSCSI (паравиртуальный контроллер VMware)"),
+                ("vioscsi", "virtio-scsi (KVM)"),
+                ("storvsc", "storvsc (Hyper-V)"),
+                ("vmscsi", "LSI Logic SCSI (VMware, устаревший)")
+            })
+                if (Native.RegKeyExists(@"SYSTEM\CurrentControlSet\Services\" + svc))
+                {
+                    sys.DiskController = label;
+                    break;
+                }
         }
         if (sys.CpuName.Length == 0) sys.CpuName = "не определён";
         return sys;
@@ -184,6 +213,13 @@ public sealed class MonitoringEngine : IDisposable
             _sys.Initialize();
             foreach (var skipped in _sys.Skipped)
                 Log?.Invoke("Счётчик недоступен: " + skipped);
+            if (Sys.Virt.Length > 0)
+                Log?.Invoke("Платформа: виртуальная машина " + Sys.Virt +
+                    (Sys.DiskController.Length > 0 ? ", контроллер диска: " + Sys.DiskController : ""));
+            if (_sys.DiskSource == "LogicalDisk")
+                Log?.Invoke("Счётчики PhysicalDisk отсутствуют (характерно для ВМ) — метрики нагрузки и очередей собираются по томам (LogicalDisk).");
+            else if (_sys.DiskSource.Length == 0)
+                Log?.Invoke("Счётчики диска недоступны: нагрузку и очереди диска отслеживать нечем (см. находки отчёта).");
         }
         catch (Exception ex)
         {
@@ -413,16 +449,29 @@ public sealed class MonitoringEngine : IDisposable
     private LivePoint AddLive(SystemSample s)
     {
         // NaN сохраняем осознанно: «счётчика нет» и «значение 0» — разные вещи
-        double diskLat = double.NaN;
+        double diskLat = double.NaN, diskBusy = double.NaN, qMax = double.NaN, diskMbps = double.NaN;
         if (s.Physical.Count > 0)
         {
             var vals = new List<double>();
+            var bvals = new List<double>();
+            var qvals = new List<double>();
+            double mbps = 0; bool anyMbps = false;
             foreach (var d in s.Physical)
             {
                 if (!double.IsNaN(d.LatReadMs)) vals.Add(d.LatReadMs);
                 if (!double.IsNaN(d.LatWriteMs)) vals.Add(d.LatWriteMs);
+                if (!double.IsNaN(d.BusyPct)) bvals.Add(d.BusyPct);
+                if (!double.IsNaN(d.QueueCur)) qvals.Add(d.QueueCur);
+                if (!double.IsNaN(d.ReadMbps) || !double.IsNaN(d.WriteMbps))
+                {
+                    mbps += (double.IsNaN(d.ReadMbps) ? 0 : d.ReadMbps) + (double.IsNaN(d.WriteMbps) ? 0 : d.WriteMbps);
+                    anyMbps = true;
+                }
             }
             if (vals.Count > 0) diskLat = vals.Max();
+            if (bvals.Count > 0) diskBusy = bvals.Max();
+            if (qvals.Count > 0) qMax = qvals.Max();
+            if (anyMbps) diskMbps = mbps;
         }
 
         var p = new LivePoint
@@ -433,6 +482,9 @@ public sealed class MonitoringEngine : IDisposable
             NetMbps = s.Nets.Sum(n => (double.IsNaN(n.RxMbps) ? 0 : n.RxMbps) + (double.IsNaN(n.TxMbps) ? 0 : n.TxMbps)),
             DiskLatMaxMs = diskLat,
             DiskQueueAvg = s.Physical.Count == 0 ? double.NaN : s.Physical.Average(d => double.IsNaN(d.QueueCur) ? 0 : d.QueueCur),
+            DiskQueueMax = qMax,
+            DiskBusyPct = diskBusy,
+            DiskMbps = diskMbps,
             TcpEst = s.TcpEstablished,
             ProcQueue = s.ProcQueueLen
         };

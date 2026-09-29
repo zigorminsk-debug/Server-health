@@ -20,6 +20,8 @@ public sealed class SystemSample
     // Диски
     public List<DiskSample> Physical = new List<DiskSample>();
     public List<LogicDiskSample> Logical = new List<LogicDiskSample>();
+    /// <summary>Источник метрик нагрузки: "PhysicalDisk" / "LogicalDisk" / "" (нет).</summary>
+    public string DiskSource = "";
 
     // Сеть
     public List<NetSample> Nets = new List<NetSample>();
@@ -35,7 +37,13 @@ public sealed class SystemSample
 public sealed class DiskSample
 {
     public string Name = "";
-    public double QueueCur, LatReadMs, LatWriteMs, ReadMbps, WriteMbps, Iops;
+    /// <summary>'P' — PhysicalDisk, 'L' — LogicalDisk (запасной источник, часто в ВМ).</summary>
+    public char Source = 'P';
+    public double QueueCur;      // Current Disk Queue Length
+    public double QueueAvg;      // Avg. Disk Queue Length (счётчик)
+    public double BusyPct;       // 100 - % Idle Time = занятость диска
+    public double LatReadMs, LatWriteMs;
+    public double ReadMbps, WriteMbps, Iops;
 }
 
 public sealed class LogicDiskSample

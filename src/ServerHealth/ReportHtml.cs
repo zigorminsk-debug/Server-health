@@ -39,6 +39,21 @@ public static class ReportHtml
         var topConn = act2.Where(p => p.TcpEstMax > 0).OrderByDescending(p => p.TcpEstMax).Take(15)
             .Select(p => new { n = p.Name, pid = p.Pid, est = p.TcpEstMax, tot = p.TcpTotalMax }).ToList();
 
+        var disks = samples.SelectMany(s => s.Physical).GroupBy(d => d.Name).Select(g => new
+        {
+            n = g.Key,
+            kind = g.First().Source == 'L' ? "том" : "диск",
+            busyAvg = R(g.Average(d => double.IsNaN(d.BusyPct) ? 0 : d.BusyPct)),
+            busyMax = R(g.Max(d => double.IsNaN(d.BusyPct) ? 0 : d.BusyPct)),
+            latR = R(Analyzer.Percentile(g.Select(d => double.IsNaN(d.LatReadMs) ? 0 : d.LatReadMs), 0.95)),
+            latW = R(Analyzer.Percentile(g.Select(d => double.IsNaN(d.LatWriteMs) ? 0 : d.LatWriteMs), 0.95)),
+            qAvg = R(g.Average(d => double.IsNaN(d.QueueCur) ? 0 : d.QueueCur)),
+            qMax = R(g.Max(d => double.IsNaN(d.QueueCur) ? 0 : d.QueueCur)),
+            mbpsAvg = R(g.Average(d => (double.IsNaN(d.ReadMbps) ? 0 : d.ReadMbps) + (double.IsNaN(d.WriteMbps) ? 0 : d.WriteMbps))),
+            mbpsMax = R(g.Max(d => (double.IsNaN(d.ReadMbps) ? 0 : d.ReadMbps) + (double.IsNaN(d.WriteMbps) ? 0 : d.WriteMbps))),
+            iopsMax = R(g.Max(d => double.IsNaN(d.Iops) ? 0 : d.Iops))
+        }).OrderByDescending(d => d.busyAvg).ToList();
+
         var findings = analysis.Findings
             .OrderBy(f => f.Severity == "CRITICAL" ? 0 : f.Severity == "WARNING" ? 1 : 2)
             .Select(f => new { sev = f.Severity, cat = f.Category, title = f.Title, sym = f.Symptom, cause = f.Cause, act = f.Actions, ver = f.Verify }).ToList();
@@ -53,6 +68,8 @@ public static class ReportHtml
             net = samples.Select(s => R(s.Nets.Sum(n => (double.IsNaN(n.RxMbps) ? 0 : n.RxMbps) + (double.IsNaN(n.TxMbps) ? 0 : n.TxMbps)))).ToArray(),
             lat = samples.Select(s => s.Physical.Count == 0 ? 0 : R(s.Physical.Max(d => double.IsNaN(d.LatReadMs) ? 0 : Math.Max(d.LatReadMs, double.IsNaN(d.LatWriteMs) ? 0 : d.LatWriteMs)))).ToArray(),
             q = samples.Select(s => s.Physical.Count == 0 ? 0 : R(s.Physical.Average(d => double.IsNaN(d.QueueCur) ? 0 : d.QueueCur))).ToArray(),
+            qmax = samples.Select(s => s.Physical.Count == 0 ? 0 : R(s.Physical.Max(d => double.IsNaN(d.QueueCur) ? 0 : d.QueueCur))).ToArray(),
+            busy = samples.Select(s => s.Physical.Count == 0 ? 0 : R(s.Physical.Max(d => double.IsNaN(d.BusyPct) ? 0 : d.BusyPct))).ToArray(),
             tcp = samples.Select(s => s.TcpEstablished).ToArray(),
             pql = samples.Select(s => R(s.ProcQueueLen)).ToArray()
         };
@@ -72,7 +89,8 @@ public static class ReportHtml
             },
             scores = analysis.Scores.Select(s => new { k = s.Key, v = s.Value }).ToArray(),
             verdict = new { title = analysis.VerdictTitle, text = analysis.VerdictText, crit = analysis.HasCritical },
-            charts, topCpu, topMem, topIo, topConn, findings,
+            charts, topCpu, topMem, topIo, topConn, disks, findings,
+            vm = new { plat = sys.Virt, ctrl = sys.DiskController, dsrc = samples.FirstOrDefault()?.DiskSource ?? "" },
             ev = events.Take(25).Select(e => new { log = e.Log, prov = e.Provider, id = e.Id, lvl = e.LevelName, cnt = e.Count, last = e.Last.ToString("dd.MM HH:mm"), dur = e.DuringCollection, sample = e.Sample }).ToArray()
         };
         string json = JsonSerializer.Serialize(payload, new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
@@ -94,7 +112,9 @@ public static class ReportHtml
         sb.Append("<header><div class=\"brand\"><img alt=\"\" src=\"data:image/png;base64,").Append(Favicon).Append("\" class=\"logo\">")
           .Append("<div><h1>ServerHealth <span class=\"ver\">v").Append(Enc(sys.AppVersion)).Append("</span></h1>")
           .Append("<div class=\"sub\">").Append(Enc(sys.Machine)).Append(" · ").Append(Enc(sys.CpuName)).Append(" ×").Append(sys.Cores)
-          .Append(" · ОЗУ ").Append(F(sys.RamGb, "0.#")).Append(" ГБ · ").Append(Enc(sys.Os)).Append("</div></div></div>")
+          .Append(" · ОЗУ ").Append(F(sys.RamGb, "0.#")).Append(" ГБ");
+        if (sys.IsVm) sb.Append(" · <span class=\"warn\">ВМ ").Append(Enc(sys.Virt)).Append("</span>");
+        sb.Append(" · ").Append(Enc(sys.Os)).Append("</div></div></div>");
           .Append("<div class=\"period\">Период: <b>").Append(Enc(sys.CollectedStart.ToString("dd.MM.yyyy HH:mm:ss")))
           .Append(" — ").Append(Enc(sys.CollectedEnd.ToString("HH:mm:ss"))).Append("</b> (")
           .Append(F(duration.TotalMinutes, "0.#")).Append(" мин, замеров: ").Append(samples.Count).Append(")")
@@ -124,6 +144,7 @@ public static class ReportHtml
         ChartCard(sb, "c-cpu", "Процессор, % (зелёный штрих — режим ядра)", "#61afef", "#61afef22", "c-cpu2");
         ChartCard(sb, "c-ram", "Свободная память, МБ", "#4cc38a", "#4cc38a22");
         ChartCard(sb, "c-lat", "Макс. задержка диска, мс", "#e5c07b", "#e5c07b22");
+        ChartCard(sb, "c-busy", "Нагрузка диска (занятость), %", "#e06c75", "#e06c7522");
         ChartCard(sb, "c-q", "Очередь к дискам (средняя)", "#d19a66", "#d19a6622");
         ChartCard(sb, "c-net", "Сеть: приём+передача, Мбит/с", "#c678dd", "#c678dd22");
         ChartCard(sb, "c-tcp", "TCP-соединений ESTABLISHED", "#56b6c2", "#56b6c222");
@@ -135,12 +156,14 @@ public static class ReportHtml
           .Append("<button class=\"tab\" data-t=\"tp-mem\">По памяти</button>")
           .Append("<button class=\"tab\" data-t=\"tp-io\">По вводу-выводу</button>")
           .Append("<button class=\"tab\" data-t=\"tp-net\">По соединениям</button>")
+          .Append("<button class=\"tab\" data-t=\"tp-dsk\">Диски (нагрузка)</button>")
           .Append("<button class=\"tab\" data-t=\"tp-ev\">События Windows</button>")
           .Append("</div>");
         sb.Append("<div id=\"tp-cpu\" class=\"tabv show\"><table class=\"tbl\"><thead><tr><th>Процесс</th><th>PID</th><th>CPU ср., %</th><th>CPU макс., %</th><th>Зависания</th></tr></thead><tbody id=\"b-cpu\"></tbody></table></div>");
         sb.Append("<div id=\"tp-mem\" class=\"tabv\"><table class=\"tbl\"><thead><tr><th>Процесс</th><th>PID</th><th>Частная ср., МБ</th><th>Макс., МБ</th><th>Тек., МБ</th><th>Рост, МБ/ч</th></tr></thead><tbody id=\"b-mem\"></tbody></table></div>");
         sb.Append("<div id=\"tp-io\" class=\"tabv\"><table class=\"tbl\"><thead><tr><th>Процесс</th><th>PID</th><th>Чтение, Мбит/с</th><th>Запись, Мбит/с</th><th>Чтение, оп/с</th><th>Запись, оп/с</th></tr></thead><tbody id=\"b-io\"></tbody></table></div>");
         sb.Append("<div id=\"tp-net\" class=\"tabv\"><table class=\"tbl\"><thead><tr><th>Процесс</th><th>PID</th><th>TCP est. макс</th><th>Всего макс</th></tr></thead><tbody id=\"b-net\"></tbody></table></div>");
+        sb.Append("<div id=\"tp-dsk\" class=\"tabv\"><div id=\"dsk-note\" class=\"dsknote\"></div><table class=\"tbl\"><thead><tr><th>Диск/том</th><th>Занятость ср., %</th><th>Занятость макс., %</th><th>Задержка чт. P95, мс</th><th>Задержка зап. P95, мс</th><th>Очередь ср.</th><th>Очередь макс.</th><th>Поток ср., Мбит/с</th><th>Поток макс., Мбит/с</th><th>IOPS макс</th></tr></thead><tbody id=\"b-dsk\"></tbody></table></div>");
         sb.Append("<div id=\"tp-ev\" class=\"tabv\"><table class=\"tbl\"><thead><tr><th>Журнал</th><th>Поставщик</th><th>Код</th><th>Уровень</th><th>Кол-во</th><th>Последнее</th><th>Во время наблюдения</th></tr></thead><tbody id=\"b-ev\"></tbody></table></div>");
         sb.Append("</section>\n");
 
@@ -221,6 +244,7 @@ canvas.mini { height:44px; margin-top:4px; }
 .tbl tr:hover td { background:#232335; }
 .num { text-align:right; font-variant-numeric:tabular-nums; }
 .hung { color:var(--bad); font-weight:600; }
+.dsknote { font-size:12.5px; color:var(--mut); background:rgba(229,192,123,.08); border:1px solid rgba(229,192,123,.25); border-radius:8px; padding:8px 12px; margin:0 0 10px; }
 .gr { color:var(--mid); }
 .finding { border:1px solid var(--line); border-left-width:4px; border-radius:8px; margin-bottom:10px; background:var(--card2); }
 .finding.sev-CRITICAL { border-left-color:var(--bad); }
@@ -296,6 +320,7 @@ function drawAll(){
   const lg=document.getElementById('lg-c-ram');
   if(lg && ramEl) lg.innerHTML += ' · всего ОЗУ: '+DATA.meta.ram+' ГБ';
   chart('c-lat', ch.lat, '#e5c07b', '#e5c07b22', 'мс');
+  if(ch.busy && DATA.vm && DATA.vm.dsrc) chart('c-busy', ch.busy, '#e06c75', '#e06c7522', '%', 100); else { const el=document.getElementById('c-busy'); if(el) el.closest('.card').style.display='none'; }
   chart('c-q',   ch.q,   '#d19a66', '#d19a6622', '');
   chart('c-net', ch.net, '#c678dd', '#c678dd22', 'Мбит/с');
   chart('c-tcp', ch.tcp, '#56b6c2', '#56b6c222', '');
@@ -327,6 +352,17 @@ if(DATA.topIo) document.getElementById('b-io').innerHTML = DATA.topIo.map(functi
 if(DATA.topConn) document.getElementById('b-net').innerHTML = DATA.topConn.map(function(p){
   return row([h(p.n), num(p.pid), num(p.est), num(p.tot)]);
 }).join('') || '<tr><td colspan=4>нет данных</td></tr>';
+if(DATA.disks && DATA.disks.length) document.getElementById('b-dsk').innerHTML = DATA.disks.map(function(d){
+  const busyCls = d.busyMax>=85?'gr':(d.busyMax>=60?'hung':'');
+  return row([h(d.n)+' <span class="cat">'+h(d.kind)+'</span>', num(d.busyAvg, busyCls), num(d.busyMax, busyCls), num(d.latR, d.latR>20?'hung':''), num(d.latW, d.latW>20?'hung':''), num(d.qAvg), num(d.qMax, d.qMax>=4?'hung':''), num(d.mbpsAvg), num(d.mbpsMax), num(d.iopsMax)]);
+}).join('') || '<tr><td colspan=10>метрики диска недоступны (см. находки: diskperf -n, lodctr /r)</td></tr>';
+if(DATA.vm){
+  let note = '';
+  if(DATA.vm.dsrc==='LogicalDisk') note += 'Метрики собраны по томам (LogicalDisk): объект PhysicalDisk отсутствует — характерно для ВМ. Очередь = очередь запросов этой машины.';
+  else if(!DATA.vm.dsrc) note += 'Метрики нагрузки диска недоступны — см. находку «Метрики нагрузки и очередей диска недоступны» (diskperf -n, lodctr /r).';
+  if(DATA.vm.plat) note += (note?' ':'') + 'Платформа: ' + DATA.vm.plat + ' — реальную нагрузку на хранилище (все ВМ) видно только на гипервизоре.' + (DATA.vm.ctrl?' Контроллер: '+DATA.vm.ctrl+'.':'');
+  const nel = document.getElementById('dsk-note'); if(note && nel) nel.textContent = note;
+}
 if(DATA.ev) document.getElementById('b-ev').innerHTML = DATA.ev.map(function(e){
   return row([h(e.log), h(e.prov), num(e.id), h(e.lvl), num(e.cnt), h(e.last), e.dur?'<span class="hung">ДА</span>':'']);
 }).join('') || '<tr><td colspan=7>событий нет</td></tr>';

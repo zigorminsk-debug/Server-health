@@ -619,8 +619,11 @@ public sealed class MainForm : Form
         var sys = _sysStatic;
         Text = "ServerHealth — " + sys.Machine;
         _lblHost.Text = sys.Machine + " · " + sys.Cores + " лог. ядер · ОЗУ " + sys.RamGb.ToString("0.#") + " ГБ" +
+                        (sys.IsVm ? " · ВМ " + sys.Virt : "") +
                         (sys.Elevated ? "" : " · БЕЗ ПРАВ АДМИНИСТРАТОРА");
-        try { _tip.SetToolTip(_lblHost, sys.CpuName + " ×" + sys.Cores); } catch { }
+        try { _tip.SetToolTip(_lblHost, sys.CpuName + " ×" + sys.Cores +
+            (sys.IsVm ? "\nВиртуальная машина: " + sys.Virt +
+                (sys.DiskController.Length > 0 ? "\nКонтроллер диска: " + sys.DiskController : "") : "")); } catch { }
         _chart.SetRam(_ramGb);
     }
 
@@ -740,12 +743,19 @@ public sealed class MainForm : Form
                 "свободно из " + _ramGb.ToString("0.#") + " ГБ");
         }
 
-        if (double.IsNaN(p.DiskLatMaxMs))
+        if (double.IsNaN(p.DiskLatMaxMs) && double.IsNaN(p.DiskBusyPct))
             _scDisk.SetLive("н/д", -1, "счётчики диска недоступны");
         else
-            _scDisk.SetLive(p.DiskLatMaxMs.ToString("0.##") + " мс",
-                (int)Math.Round(Math.Clamp(p.DiskLatMaxMs * 2, 0, 100)),
-                "макс. задержка диска");
+        {
+            // основное значение — занятость диска (нагрузка); в подписи — очередь и поток
+            string big = double.IsNaN(p.DiskBusyPct) ? "—" : p.DiskBusyPct.ToString("0") + " %";
+            int load = double.IsNaN(p.DiskBusyPct) ? -1 : (int)Math.Round(Math.Clamp(p.DiskBusyPct, 0, 100));
+            var parts = new List<string>();
+            parts.Add("очередь " + (double.IsNaN(p.DiskQueueMax) ? "н/д" : p.DiskQueueMax.ToString("0.#")));
+            if (!double.IsNaN(p.DiskMbps) && p.DiskMbps > 0) parts.Add((p.DiskMbps / 8.0).ToString("0.#") + " МБ/с");
+            if (!double.IsNaN(p.DiskLatMaxMs)) parts.Add("задержка " + p.DiskLatMaxMs.ToString("0.##") + " мс");
+            _scDisk.SetLive(big, load, string.Join(" · ", parts));
+        }
 
         if (double.IsNaN(p.NetMbps))
             _scNet.SetLive("н/д", -1, "счётчики сети недоступны");

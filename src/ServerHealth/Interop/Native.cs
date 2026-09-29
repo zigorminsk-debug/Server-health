@@ -14,6 +14,11 @@ public sealed class SysInfo
     public string PowerPlan = "";
     public string PageFileConfig = "";
     public string AppVersion = "";
+    /// <summary>Платформа виртуализации гостя: "VMware (ESXi/vSphere)", "Microsoft Hyper-V" и т.п.; "" — физический сервер.</summary>
+    public string Virt = "";
+    public bool IsVm { get { return Virt.Length > 0; } }
+    /// <summary>Тип дискового контроллера ВМ (PVSCSI/storvsc/…); "" — не определён или физический.</summary>
+    public string DiskController = "";
     public DateTime CollectedStart, CollectedEnd;
 }
 
@@ -481,6 +486,26 @@ internal static class Native
         }
         catch { return ""; }
         finally { try { Marshal.FreeHGlobal(buf); } catch { } }
+    }
+
+    private const int KEY_READ = 0x20019;
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode)]
+    private static extern int RegOpenKeyExW(UIntPtr hKey, string lpSubKey, uint ulOptions, int samDesired, out UIntPtr phkResult);
+
+    [DllImport("advapi32.dll")]
+    private static extern int RegCloseKey(UIntPtr hKey);
+
+    /// <summary>Существует ли раздел в HKLM (для определения гостевых драйверов гипервизора).</summary>
+    public static bool RegKeyExists(string subKey)
+    {
+        try
+        {
+            int rc = RegOpenKeyExW(HKEY_LOCAL_MACHINE, subKey, 0, KEY_READ, out UIntPtr h);
+            if (rc == 0) { RegCloseKey(h); return true; }
+            return false;
+        }
+        catch { return false; }
     }
 
     public static List<string> RegGetMultiString(string subKey, string valueName)

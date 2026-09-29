@@ -182,6 +182,9 @@ public static class Analyzer
         var latWMax = Metric(x.Samples, s => s.Physical.Count == 0 ? double.NaN : s.Physical.Max(d => double.IsNaN(d.LatWriteMs) ? 0 : d.LatWriteMs), 50);
         var dQueueAvg = Metric(x.Samples, s => s.Physical.Count == 0 ? double.NaN : s.Physical.Average(d => double.IsNaN(d.QueueCur) ? 0 : d.QueueCur), 2);
         var dQueueMax = Metric(x.Samples, s => s.Physical.Count == 0 ? double.NaN : s.Physical.Max(d => double.IsNaN(d.QueueCur) ? 0 : d.QueueCur), 4);
+        // занятость диска (100 - % Idle Time): доля времени, когда диск обслуживался
+        var busyMax = Metric(x.Samples, s => s.Physical.Count == 0 ? double.NaN : s.Physical.Max(d => double.IsNaN(d.BusyPct) ? 0 : d.BusyPct), 85);
+        bool noDiskPerf = x.Samples.All(s => s.Physical.Count == 0);
 
         // сеть: суммарная утилизация по интерфейсам
         double NetUtilP95 = 0;
@@ -228,6 +231,7 @@ public static class Analyzer
             - Math.Max(0, (latR.P95 - 20)) * 1.5
             - Math.Max(0, (latW.P95 - 20)) * 1.5
             - (dQueueAvg.ShareAbove > 0.15 ? 20 : 0)
+            - (busyMax.ShareAbove >= 0.3 ? 10 : 0)
             - (MinFreePct(x) < 10 ? 15 : 0);
         double netScore = 100
             - Math.Max(0, (NetUtilP95 - 65)) * 2
@@ -392,7 +396,20 @@ public static class Analyzer
                 if (adv != null) f.Actions.AddRange(adv);
             }
             f.Actions.Add("Исключить наложенные нагрузки: перенести антивирусное сканирование/бэкапы на ночные окна; отключить индексацию Windows Search на рабочих томах.");
-            f.Actions.Add("Виртуальная машина: проверить, что диски не на перегруженном хранилище (метрики хоста/СХД), увеличить лимиты IOPS у хостинг-провайдера.");
+            if (x.Sys.Virt.Contains("VMware"))
+            {
+                f.Actions.Add("ВМ на VMware — смотреть хранилище на гипервизоре: vSphere Client -> Monitoring -> Performance -> Datastore/Virtual Disk: задержка GAVG до 10 мс — норма, 10-25 мс — деградация, выше 25 мс — проблема СХД.");
+                f.Actions.Add("Проверить: снапшоты ВМ (AVHDX тормозят, удалить просроченные), плотность ВМ на одном datastore, тип диска (thin на перегруженном LUN), лимиты IOPS/IOPS share в Storage Policies.");
+                if (x.Sys.DiskController.Contains("PVSCSI"))
+                    f.Actions.Add("Контроллер PVSCSI: при высоких очередях поднять Disk.SchedQuantum (по умолч. 64) и проверить версию VMware Tools (старые pvscsi-драйверы давали очереди-пробки).");
+            }
+            else if (x.Sys.Virt.Contains("Hyper-V"))
+            {
+                f.Actions.Add("ВМ на Hyper-V — на ХОСТЕ выполнить: Get-Counter '\\Hyper-V Virtual Storage Device\\Average Latency\\*' (норма до 10 мс) и '\\Hyper-V Virtual Storage Device\\Current Queue Length\\*'.");
+                f.Actions.Add("Проверить: VHDX фиксированный (dynamic тормозит на росте), нет цепочки контрольных точек (AVHDX), VHDX не на томе ОС хоста, для 1С/SQL — отдельный VHDX/том, включить Set-VM -AutomaticCheckpointsEnabled $false.");
+            }
+            else
+                f.Actions.Add("Виртуальная машина: проверить, что диски не на перегруженном хранилище (метрики хоста/СХД), увеличить лимиты IOPS у хостинг-провайдера.");
             f.Actions.Add("Стратегически: перевести сервер на SSD/NVMe — для терминального сервера это самое эффективное вложение.");
             f.Verify.Add("Повторный замер: Avg. Disk sec/Transfer < 20 мс (HDD) или < 5 мс (SSD), Current Disk Queue Length < 2 на диск.");
             r.Findings.Add(f);
@@ -407,6 +424,83 @@ public static class Analyzer
                 Symptom = string.Format("Текущая очередь к дискам превышала 2 в {0:F0}% замеров (средняя {1:F1}, максимум {2:F0}), при этом задержки пока в норме.", dQueueAvg.ShareAbove * 100, dQueueAvg.Avg, dQueueMax.Max),
                 Cause = "Диск работает на пределе, всплески параллельных запросов (старт приложений, массовое открытие файлов).",
                 Actions = { "Профилировать пики: когда возникают (начало рабочего дня, запуск 1С/Outlook всеми сразу) — разнести нагрузку.", "Вынести файл подкачки/профили на отдельный быстрый диск.", "Рассмотреть SSD при апгрейде." }
+            });
+            var qf = r.Findings[r.Findings.Count - 1];
+            if (x.Sys.Virt.Contains("VMware"))
+                qf.Actions.Add("ВМ на VMware: очередь в гостевой ОС — только очередь ЭТОЙ ВМ. Если она высокая при нормальной задержке на datastore — очередь возникает в госте: проверить PVSCSI/драйверы VMware Tools, число vCPU и лимиты диска ВМ.");
+            else if (x.Sys.Virt.Contains("Hyper-V"))
+                qf.Actions.Add("ВМ на Hyper-V: очередь в гостевой ОС — только очередь ЭТОЙ ВМ. Сверить на хосте: Get-Counter '\\Hyper-V Virtual Storage Device\\Current Queue Length\\*' — если там пусто, узкое место внутри гостя.");
+        }
+        // занятость диска близка к 100% — узкое место даже при короткой очереди
+        if (!noDiskPerf && busyMax.P95 >= 85)
+        {
+            bool crit = busyMax.Avg >= 85;
+            var f = new Finding
+            {
+                Category = "Disk",
+                Severity = crit ? "CRITICAL" : "WARNING",
+                Title = string.Format("Диск занят {0:F0}% времени (P95 до {1:F0}%)", busyMax.Avg, busyMax.P95),
+                Symptom = string.Format("Занятость самого нагруженного диска (100-% Idle Time): средняя {0:F0}%, P95 {1:F0}%, максимум {2:F0}% — диск почти не простаивает.",
+                    busyMax.Avg, busyMax.P95, busyMax.Max),
+                Cause = "Диск — узкое место: объём запросов сопоставим с его пропускной способностью. Очередь может быть короткой (диски обслуживают запросы вразнобой), но каждый новый запрос ждёт своей очереди."
+            };
+            foreach (var d in TopWorstBusyDisks(x)) f.Symptom += " " + d;
+            if (x.Sys.Virt.Contains("VMware"))
+            {
+                f.Actions.Add("ВМ на VMware: разделить нагрузку — вынести диски ВМ на отдельные datastores, проверить суммарную нагрузку других ВМ на этом datastore (vSphere -> Datastore -> Performance).");
+                f.Actions.Add("Для 1С/SQL: отдельный datastore на SSD/PMEM, Storage Policy с более высоким классом (Storage DRS вручную, без overly-committed LUN).");
+            }
+            else if (x.Sys.Virt.Contains("Hyper-V"))
+            {
+                f.Actions.Add("ВМ на Hyper-V: разнести VHDX по физическим дискам хоста, проверить нагрузку других ВМ на тот же том (Get-Counter '\\Hyper-V Virtual Storage Device\\Read Bytes/sec\\*').");
+                f.Actions.Add("Для 1С/SQL: отдельный VHDX на SSD-том хоста; включить Storage QoS только для «шумных соседей».");
+            }
+            else
+                f.Actions.Add("Разнести нагрузку по разным физическим дискам/массивам; для терминального сервера с профилями — SSD обязателен.");
+            f.Verify.Add("Повторный замер: занятость диска (100-% Idle Time) ниже 80% в пиках.");
+            r.Findings.Add(f);
+        }
+        // счётчики производительности диска недоступны — раздел слепой
+        if (noDiskPerf)
+        {
+            var f = new Finding
+            {
+                Category = "Disk",
+                Severity = "WARNING",
+                Title = "Метрики нагрузки и очередей диска недоступны — диск не под наблюдением",
+                Symptom = "За весь период не получено ни одной точки по задержкам, очередям и потоку диска: раздел «Диски» отчёта пуст, оценка диска посчитана только по свободному месту.",
+                Cause = x.Sys.IsVm
+                    ? "В гостевой ОС не работают счётчики диска: повреждены/отключены счётчики производительности или стоят гостевые драйверы без провайдеров счётчиков (pvscsi/storvsc/vioscsi)."
+                    : "Счётчики диска повреждены или отключены (diskperf -n); часто после сбоя WMI/счётчиков или «облегчающих» твиков."
+            };
+            f.Actions.Add("Включить счётчики диска: запустить командную строку от администратора -> diskperf -n -> перезапустить ServerHealth (обычно уже включено, команда ничего не ломает).");
+            f.Actions.Add("Восстановить счётчики производительности: lodctr /r, затем winmgmt /resyncperf; перезагрузка после этого надёжнее всего.");
+            f.Actions.Add("Проверить в perfmon (mmc -> Счётчики производительности -> добавить): видны ли объекты PhysicalDisk/LogicalDisk. Если объекты есть, а ServerHealth их не видит — запустить ServerHealth от администратора.");
+            if (x.Sys.Virt.Contains("VMware"))
+                f.Actions.Add("ВМ на VMware: обновить VMware Tools (драйвер pvscsi поставляет часть счётчиков); при пустом PhysicalDisk — это известная особенность, ориентируйтесь на LogicalDisk и на метрики гипервизора: vSphere -> Monitoring -> Performance -> Virtual Disk (latency, KAVG/OAVG).");
+            else if (x.Sys.Virt.Contains("Hyper-V"))
+                f.Actions.Add("ВМ на Hyper-V: убедиться, что Integration Services актуальны; виден только LogicalDisk — собирайте метрики на хосте: Get-Counter '\\Hyper-V Virtual Storage Device\\*' (Latency, Queue Length, Read/Write Bytes).");
+            f.Verify.Add("В новом отчёте раздел 5 «Дисковая подсистема» показывает задержки/очереди/занятость по дискам (или по томам).");
+            r.Findings.Add(f);
+        }
+        // чек-лист для ВМ: гость видит только свой I/O
+        if (x.Sys.IsVm)
+        {
+            r.Findings.Add(new Finding
+            {
+                Category = "Disk",
+                Severity = "INFO",
+                Title = "Виртуальная машина (" + x.Sys.Virt + "): дисковые метрики гостя — только часть картины",
+                Symptom = "Гостевая ОС видит только ввод-вывод ЭТОЙ ВМ: очередь гостя считается от поданных ею запросов, а задержка может «срезаться» кэшами гипервизора/СХД. Реальную нагрузку на хранилище (включая соседние ВМ) видно только на гипервизоре." +
+                    (x.Sys.DiskController.Length > 0 ? " Дисковый контроллер ВМ: " + x.Sys.DiskController + "." : ""),
+                Cause = "Гипервизор планирует дисковый ввод-вывод всех ВМ на общем хранилище; параметры гостевой ОС (очередь 2 и т.п.) в ВМ трактуются иначе, чем на физическом сервере.",
+                Actions = {
+                    "ESXi/vSphere: vSphere Client -> Monitoring -> Performance -> Datastore: latency GAVG до 10 мс — норма; Virtual Disk (по ВМ): latency до 10-15 мс; KAVG (очередь адаптера гостя) выше 1-2 — узкое место в госте, DAVG — на хранилище.",
+                    "ESXi: проверить снапшоты ВМ (удалить просроченные), плотность ВМ на datastore, ширину очереди PVSCSI (Disk.SchedQuantum), резервирование IOPS в Storage Policy.",
+                    "Hyper-V: на ХОСТЕ — Get-Counter '\\Hyper-V Virtual Storage Device\\Average Latency\\*' (до 10 мс) и '\\Hyper-V Virtual Storage Device\\Current Queue Length\\*'; VHDX фиксированные, без цепочек контрольных точек, на отдельных томах для тяжёлых нагрузок.",
+                    "Общее: сравнить пики раздела 5 (диски) с метриками гипервизора за то же окно — где очередь растёт раньше, там и узкое место (в госте или на хранилище)."
+                },
+                Verify = { "Задержки в госте (раздел 5) и на гипервизоре не противоречат друг другу; на datastore latency GAVG < 10 мс." }
             });
         }
         double minFree = MinFreePct(x);
@@ -692,6 +786,21 @@ public static class Analyzer
             if (l.FreePct < min) min = l.FreePct;
         }
         return min;
+    }
+
+    private static List<string> TopWorstBusyDisks(Input x)
+    {
+        var res = new List<string>();
+        var groups = x.Samples.SelectMany(s => s.Physical).GroupBy(d => d.Name);
+        foreach (var g in groups)
+        {
+            double busyAvg = g.Average(d => double.IsNaN(d.BusyPct) ? 0 : d.BusyPct);
+            double busyMax = g.Max(d => double.IsNaN(d.BusyPct) ? 0 : d.BusyPct);
+            double mbpsMax = g.Max(d => (double.IsNaN(d.ReadMbps) ? 0 : d.ReadMbps) + (double.IsNaN(d.WriteMbps) ? 0 : d.WriteMbps));
+            if (busyAvg >= 60 || busyMax >= 85)
+                res.Add(string.Format("[{0}] занятость {1:F0}% ср., до {2:F0}%, поток до {3:F0} Мбит/с.", g.Key, busyAvg, busyMax, mbpsMax));
+        }
+        return res.Take(6).ToList();
     }
 
     private static List<string> TopWorstDisks(Input x)

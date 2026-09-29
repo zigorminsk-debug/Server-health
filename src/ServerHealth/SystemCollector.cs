@@ -17,10 +17,15 @@ internal sealed class SystemCollector : IDisposable
     private readonly List<string> _pfInstances = new List<string>();
     private readonly List<string> _coreInstances = new List<string>();
 
+    /// <summary>Метрики нагрузки брать с LogicalDisk (PhysicalDisk недоступен — характерно для ВМ).</summary>
+    private bool _useLogicalPerf = false;
+    /// <summary>Источник метрик нагрузки диска: "PhysicalDisk" / "LogicalDisk" / "" (нет).</summary>
+    public string DiskSource = "";
+
     private static readonly string[] PhysCounters =
     {
         "% Idle Time", "Avg. Disk sec/Read", "Avg. Disk sec/Write",
-        "Disk Read Bytes/sec", "Disk Write Bytes/sec", "Disk Transfers/sec"
+        "Avg. Disk Queue Length", "Disk Read Bytes/sec", "Disk Write Bytes/sec", "Disk Transfers/sec"
     };
     private const string PHYS_CURQ = "Current Disk Queue Length";
 
@@ -67,9 +72,30 @@ internal sealed class SystemCollector : IDisposable
     {
         // разворачиваем шаблоны экземпляров
         foreach (var p in PdhNative.ExpandWildcard(@"\PhysicalDisk(*)\Avg. Disk sec/Read"))
-            _physInstances.Add(PdhNative.InstanceOf(p));
+        {
+            string inst = PdhNative.InstanceOf(p);
+            if (inst != "_Total") _physInstances.Add(inst);   // _Total считаем сами, иначе усреднения задваиваются
+        }
         foreach (var p in PdhNative.ExpandWildcard(@"\LogicalDisk(*)\% Free Space"))
             _logInstances.Add(PdhNative.InstanceOf(p));
+
+        // Виртуальные среды: объект PhysicalDisk иногда отсутствует (гостевые драйверы
+        // ESXi PVSCSI / Hyper-V storvsc), но LogicalDisk с полными метриками нагрузки есть
+        // всегда. Тогда собираем нагрузку и очереди по томам — иначе раздел дисков пустой.
+        if (_physInstances.Count == 0)
+        {
+            foreach (var p in PdhNative.ExpandWildcard(@"\LogicalDisk(*)\Avg. Disk sec/Read"))
+            {
+                string inst = PdhNative.InstanceOf(p);
+                if (inst != "_Total" && !_physInstances.Contains(inst)) _physInstances.Add(inst);
+            }
+            if (_physInstances.Count > 0)
+            {
+                _useLogicalPerf = true;
+                DiskSource = "LogicalDisk";
+            }
+        }
+        else DiskSource = "PhysicalDisk";
         foreach (var p in PdhNative.ExpandWildcard(@"\Network Interface(*)\Bytes Received/sec"))
             _netInstances.Add(PdhNative.InstanceOf(p));
         foreach (var p in PdhNative.ExpandWildcard(@"\Paging File(*)\% Usage"))
@@ -86,12 +112,14 @@ internal sealed class SystemCollector : IDisposable
                                   C_TS_ACT, C_TS_INACT, C_SRV_REJ, C_SRV_SHORT })
             _q.AddEnglish(c);
 
-        // физические диски
+        // метрики нагрузки дисков (PhysicalDisk или LogicalDisk — см. выше)
+        string diskObj = _useLogicalPerf ? "LogicalDisk" : "PhysicalDisk";
         foreach (var inst in _physInstances)
         {
+            string b = @"\" + diskObj + "(" + inst + @")\";
             foreach (var c in PhysCounters)
-                _q.AddEnglish(@"\PhysicalDisk(" + inst + @")\" + c);
-            _q.AddEnglish(@"\PhysicalDisk(" + inst + @")\" + PHYS_CURQ);
+                _q.AddEnglish(b + c);
+            _q.AddEnglish(b + PHYS_CURQ);
         }
         // логические диски
         foreach (var inst in _logInstances)
@@ -162,19 +190,25 @@ internal sealed class SystemCollector : IDisposable
             if (!double.IsNaN(v)) s.CoreCpu.Add(new KeyValuePair<string, double>(inst, v));
         }
 
-        // физические диски
+        // метрики нагрузки дисков
+        string dObj = _useLogicalPerf ? "LogicalDisk" : "PhysicalDisk";
+        s.DiskSource = DiskSource;
         foreach (var inst in _physInstances)
         {
-            string b = @"\PhysicalDisk(" + inst + @")\";
+            string b = @"\" + dObj + "(" + inst + @")\";
+            double idle = _q.ReadDouble(b + "% Idle Time");
             var d = new DiskSample
             {
                 Name = inst,
+                Source = _useLogicalPerf ? 'L' : 'P',
                 LatReadMs = _q.ReadDouble(b + "Avg. Disk sec/Read") * 1000.0,
                 LatWriteMs = _q.ReadDouble(b + "Avg. Disk sec/Write") * 1000.0,
                 ReadMbps = _q.ReadDouble(b + "Disk Read Bytes/sec") / 131072.0,   // байт/с -> Мбит/с
                 WriteMbps = _q.ReadDouble(b + "Disk Write Bytes/sec") / 131072.0,
                 Iops = _q.ReadDouble(b + "Disk Transfers/sec"),
-                QueueCur = _q.ReadDouble(b + PHYS_CURQ)
+                QueueCur = _q.ReadDouble(b + PHYS_CURQ),
+                QueueAvg = _q.ReadDouble(b + "Avg. Disk Queue Length"),
+                BusyPct = double.IsNaN(idle) ? double.NaN : Math.Clamp(100.0 - idle, 0, 100)
             };
             s.Physical.Add(d);
         }

@@ -80,6 +80,9 @@ public static class ReportWriter
           sys.CollectedEnd.ToString("dd.MM.yyyy HH:mm:ss") +
           string.Format(" (длительность {0:F1} мин, замеров: {1})", duration.TotalMinutes, samples.Count));
         w("Права запуска: " + (sys.Elevated ? "Администратор" : "ОБЫЧНЫЙ ПОЛЬЗОВАТЕЛЬ (часть данных недоступна — запустите от администратора!)"));
+        if (sys.IsVm)
+            w("Платформа: ВИРТУАЛЬНАЯ МАШИНА " + sys.Virt +
+              (sys.DiskController.Length > 0 ? "   Контроллер диска: " + sys.DiskController : ""));
         w("");
 
         // ---- 1. Конфигурация
@@ -155,24 +158,79 @@ public static class ReportWriter
         if (knownProcsNote.Length > 0) { w(""); w("  Примечание: " + knownProcsNote); }
         w("");
 
-        // ---- 5. Диски
-        w("5. ДИСКОВАЯ ПОДСИСТЕМА");
+        // ---- 5. Диски (очереди и нагрузка — приоритетный раздел, особое внимание в ВМ)
+        w("5. ДИСКОВАЯ ПОДСИСТЕМА (нагрузка и очереди)");
         w(thin);
+        string dsrc = samples.FirstOrDefault()?.DiskSource ?? "";
         var physGroups = samples.SelectMany(s => s.Physical).GroupBy(d => d.Name).ToList();
-        if (physGroups.Count == 0) w("  Счётчики PhysicalDisk недоступны на этой системе.");
+        if (dsrc == "PhysicalDisk")
+            w(string.Format("  Источник метрик: PhysicalDisk, дисков: {0} (задержки, очереди, занятость, поток, IOPS)", physGroups.Count));
+        else if (dsrc == "LogicalDisk")
+        {
+            w(string.Format("  Источник метрик: LogicalDisk по томам: {0} (объект PhysicalDisk в системе отсутствует —",
+                string.Join(", ", physGroups.Select(g => g.Key))));
+            w("  характерно для виртуальных машин; все метрики нагрузки и очередей собраны по томам и корректны)");
+        }
+        else
+        {
+            w("  Источник метрик: НЕДОСТУПЕН — задержки/очереди/занятость за период не получены.");
+            w("  Восстановление: diskperf -n, затем lodctr /r и winmgmt /resyncperf (от администратора), перезагрузка;");
+            w("  проверить в perfmon наличие объектов PhysicalDisk/LogicalDisk.");
+        }
+        w("");
         foreach (var g in physGroups)
         {
             var latr = g.Select(d => double.IsNaN(d.LatReadMs) ? 0 : d.LatReadMs).ToList();
             var latw = g.Select(d => double.IsNaN(d.LatWriteMs) ? 0 : d.LatWriteMs).ToList();
             var q = g.Select(d => double.IsNaN(d.QueueCur) ? 0 : d.QueueCur).ToList();
+            var qa = g.Select(d => double.IsNaN(d.QueueAvg) ? 0 : d.QueueAvg).ToList();
+            var busy = g.Select(d => double.IsNaN(d.BusyPct) ? 0 : d.BusyPct).ToList();
             double mbpsAvg = g.Average(d => (double.IsNaN(d.ReadMbps) ? 0 : d.ReadMbps) + (double.IsNaN(d.WriteMbps) ? 0 : d.WriteMbps));
             double mbpsMax = g.Max(d => (double.IsNaN(d.ReadMbps) ? 0 : d.ReadMbps) + (double.IsNaN(d.WriteMbps) ? 0 : d.WriteMbps));
             double iopsMax = g.Max(d => double.IsNaN(d.Iops) ? 0 : d.Iops);
-            w(string.Format("  Диск [{0}]: задержка чтения {1}/{2}/{3} мс (ср/P95/макс), записи {4}/{5}/{6} мс;",
-                g.Key, F(avg(latr)), F(Analyzer.Percentile(latr, 0.95)), F(latr.Max()),
+            string kind = g.First().Source == 'L' ? "том" : "диск";
+            w(string.Format("  [{0}] ({1}): занятость {2:F0}% ср. / {3:F0}% макс.;",
+                g.Key, kind, avg(busy), busy.Max()));
+            w(string.Format("      задержка: чтение {0}/{1}/{2} мс, запись {3}/{4}/{5} мс (ср/P95/макс);",
+                F(avg(latr)), F(Analyzer.Percentile(latr, 0.95)), F(latr.Max()),
                 F(avg(latw)), F(Analyzer.Percentile(latw, 0.95)), F(latw.Max())));
-            w(string.Format("            очередь {0:F1}/{1}/{2}; поток {3}/{4} Мбит/с (ср/макс); {5:F0} IOPS макс",
-                avg(q), F(Analyzer.Percentile(q, 0.95), "0.#"), F(q.Max(), "0.#"), F(mbpsAvg, "0"), F(mbpsMax, "0"), iopsMax));
+            w(string.Format("      очередь: текущая {0}/{1}/{2} (ср/P95/макс), средняя по счётчику {3};",
+                F(avg(q), "0.#"), F(Analyzer.Percentile(q, 0.95), "0.#"), F(q.Max(), "0.#"), F(avg(qa), "0.#")));
+            w(string.Format("      поток: {0}/{1} Мбит/с (ср/макс); {2:F0} IOPS макс",
+                F(mbpsAvg, "0"), F(mbpsMax, "0"), iopsMax));
+        }
+        w("");
+        if (physGroups.Count > 0)
+            w("  Ориентиры: задержка SSD до 5 мс / HDD до 15-20 мс; текущая очередь до 2 на диск; занятость до 80%." +
+              (dsrc == "LogicalDisk" ? " Очередь тома = очередь запросов ЭТОЙ машины." : ""));
+        if (sys.IsVm)
+        {
+            w("");
+            w("  === ВИРТУАЛЬНАЯ СРЕДА: " + sys.Virt + " — как правильно читать дисковые метрики ===");
+            w("  Гость видит только ввод-вывод ЭТОЙ ВМ: очередь гостя — от её запросов; задержка может");
+            w("  срезаться кэшами гипервизора/СХД. Реальная нагрузка на хранилище видна ТОЛЬКО на гипервизоре.");
+            if (sys.Virt.Contains("VMware"))
+            {
+                w("  ESXi/vSphere: vSphere Client -> Monitoring -> Performance -> Datastore | Virtual Disk:");
+                w("    DAVG (задержка на хранилище) до 10 мс — норма, 10-25 — деградация, >25 — проблема СХД;");
+                w("    KAVG > 1-2 мс — узкое место в госте (драйвер/конфиг ВМ), а не на хранилище;");
+                w("    проверить снапшоты ВМ (AVHDX), плотность ВМ на datastore, лимиты IOPS Storage Policy.");
+                if (sys.DiskController.Contains("PVSCSI"))
+                    w("    Контроллер PVSCSI: при высоких очередях — обновить VMware Tools, проверить Disk.SchedQuantum (64).");
+            }
+            else if (sys.Virt.Contains("Hyper-V"))
+            {
+                w("  Hyper-V: на ХОСТЕ (не в госте):");
+                w("    Get-Counter '\\Hyper-V Virtual Storage Device\\Average Latency\\*'   — норма до 10 мс;");
+                w("    Get-Counter '\\Hyper-V Virtual Storage Device\\Current Queue Length\\*' — очередь ВМ на хосте;");
+                w("    VHDX фиксированные (dynamic тормозит при росте), без цепочек контрольных точек,");
+                w("    тяжёлые нагрузки (1С/SQL) — на отдельном VHDX и отдельном томе хоста.");
+            }
+            else
+            {
+                w("  Сверьте пики раздела 5 с метриками гипервизора за то же время — где очередь растёт");
+                w("  раньше (в госте или на хранилище), там и узкое место.");
+            }
         }
         var logGroups = samples.SelectMany(s => s.Logical).GroupBy(l => l.Name).ToList();
         foreach (var g in logGroups)

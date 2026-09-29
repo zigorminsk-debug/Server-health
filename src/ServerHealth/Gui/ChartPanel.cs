@@ -65,27 +65,48 @@ public sealed class ChartPanel : Panel
             return;
         }
 
-        int mainH = Math.Max(130, (int)(H * 0.56));
+        int mainH = Math.Max(130, (int)(H * 0.52));
         var cpuRect = new Rectangle(6, 6, W - 12, mainH - 6);
         int miniY = mainH + 10;
-        int miniH = Math.Max(76, H - miniY - 8);
-        int miniW = Math.Max(140, (W - 18) / 2);
+        int miniH = Math.Max(72, H - miniY - 8);
+        int miniW = Math.Max(120, (W - 24) / 3);
         var ramRect = new Rectangle(6, miniY, miniW, miniH);
-        var netRect = new Rectangle(ramRect.Right + 6, miniY, Math.Max(140, W - ramRect.Right - 12), miniH);
+        var netRect = new Rectangle(ramRect.Right + 6, miniY, miniW, miniH);
+        var dskRect = new Rectangle(netRect.Right + 6, miniY, Math.Max(120, W - netRect.Right - 12), miniH);
 
         var cpu = new double[d.Count];
         var ram = new double[d.Count];
         var net = new double[d.Count];
+        var dsk = new double[d.Count];
         for (int i = 0; i < d.Count; i++)
         {
             cpu[i] = d[i].Cpu;
             ram[i] = d[i].AvailMb;
             net[i] = d[i].NetMbps;
+            dsk[i] = d[i].DiskBusyPct;
         }
+
+        // диск: поток в шапке рядом с занятостью (если метрики есть)
+        LivePoint lp = d[d.Count - 1];
+        string dskTail = "";
+        if (!double.IsNaN(lp.DiskMbps) && lp.DiskMbps > 0)
+            dskTail = " · " + AxisFmt(lp.DiskMbps / 8.0) + " МБ/с";
 
         DrawChart(g, cpuRect, cpu, d, Color.FromArgb(97, 175, 239), "CPU, загрузка", 100, "%", true);
         DrawChart(g, ramRect, ram, d, Color.FromArgb(76, 195, 138), "RAM свободно", (float)(_ramGb * 1024), "МБ", false);
         DrawChart(g, netRect, net, d, Color.FromArgb(198, 120, 221), "Сеть (приём + передача)", 0, "Мбит/с", false);
+        if (double.IsNaN(lp.DiskBusyPct))
+        {
+            // метрик диска нет: честно сообщаем, а не рисуем фальшивый ноль
+            g.FillRectangle(BgBrush, dskRect);
+            g.DrawRectangle(BorderPen, dskRect);
+            TextRenderer.DrawText(g, "Диск: занятость", FTitle, dskRect, TitleColor,
+                TextFormatFlags.Left | TextFormatFlags.Top);
+            TextRenderer.DrawText(g, "нет метрик диска", FMsg, dskRect, MsgColor,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+        }
+        else
+            DrawChart(g, dskRect, dsk, d, Color.FromArgb(229, 192, 123), "Диск: занятость", 100, "%", false, dskTail);
     }
 
     private static string AxisFmt(double v)
@@ -100,7 +121,7 @@ public sealed class ChartPanel : Panel
     }
 
     private void DrawChart(Graphics g, Rectangle r, double[] vals, List<LivePoint> d,
-        Color color, string title, float fixedMax, string unit, bool showTime)
+        Color color, string title, float fixedMax, string unit, bool showTime, string? extraTail = null)
     {
         g.FillRectangle(BgBrush, r);
         g.DrawRectangle(BorderPen, r);
@@ -120,7 +141,7 @@ public sealed class ChartPanel : Panel
         var head = new Rectangle(r.X + pad, r.Y + (int)(4 * k), r.Width - 2 * pad, headH - (int)(4 * k));
         TextRenderer.DrawText(g, title, FTitle, head, TitleColor,
             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
-        string cur = AxisFmt(vals[vals.Length - 1]) + (unit.Length > 0 ? " " + unit : "");
+        string cur = AxisFmt(vals[vals.Length - 1]) + (unit.Length > 0 ? " " + unit : "") + (extraTail ?? "");
         TextRenderer.DrawText(g, cur, FValue, head, color,
             TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
 
