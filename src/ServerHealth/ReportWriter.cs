@@ -177,9 +177,9 @@ public static class ReportWriter
         foreach (var g in netGroups)
         {
             double bw = g.Where(n => n.BandwidthMbps > 0).Select(n => n.BandwidthMbps).DefaultIfEmpty(0).First();
-            double rx = g.Select(n => double.IsNaN(n.RxMbps) ? 0 : n.RxMbps).ToList();
-            double tx = g.Select(n => double.IsNaN(n.TxMbps) ? 0 : n.TxMbps).ToList();
-            double pps = g.Select(n => (double.IsNaN(n.RxPps) ? 0 : n.RxPps) + (double.IsNaN(n.TxPps) ? 0 : n.TxPps)).ToList();
+            var rx = g.Select(n => double.IsNaN(n.RxMbps) ? 0 : n.RxMbps).ToList();
+            var tx = g.Select(n => double.IsNaN(n.TxMbps) ? 0 : n.TxMbps).ToList();
+            var pps = g.Select(n => (double.IsNaN(n.RxPps) ? 0 : n.RxPps) + (double.IsNaN(n.TxPps) ? 0 : n.TxPps)).ToList();
             double errs = g.Sum(n => (double.IsNaN(n.RxEps) ? 0 : n.RxEps) + (double.IsNaN(n.TxEps) ? 0 : n.TxEps));
             double utilP95 = bw > 0 ? Analyzer.Percentile(rx.Zip(tx, (a, b) => a + b), 0.95) / bw * 100 : double.NaN;
             w(string.Format("  Интерфейс [{0}] полоса {1:F0} Мбит/с:", g.Key, bw));

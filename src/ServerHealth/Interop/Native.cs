@@ -186,8 +186,8 @@ internal static class Native
                     {
                         Pid = Marshal.ReadInt32(buf, o + 20),
                         State = Marshal.ReadInt32(buf, o),
-                        Local = Ip4(Marshal.ReadUInt32(buf, o + 4)) + ":" + NetPort(Marshal.ReadUInt32(buf, o + 8)),
-                        Remote = Ip4(Marshal.ReadUInt32(buf, o + 12)) + ":" + NetPort(Marshal.ReadUInt32(buf, o + 16))
+                        Local = Ip4(unchecked((uint)Marshal.ReadInt32(buf, o + 4))) + ":" + NetPort(unchecked((uint)Marshal.ReadInt32(buf, o + 8))),
+                        Remote = Ip4(unchecked((uint)Marshal.ReadInt32(buf, o + 12))) + ":" + NetPort(unchecked((uint)Marshal.ReadInt32(buf, o + 16)))
                     };
                     res.Add(c);
                 }
@@ -204,8 +204,8 @@ internal static class Native
                         IsV6 = true,
                         Pid = Marshal.ReadInt32(buf, o + 52),
                         State = Marshal.ReadInt32(buf, o + 48),
-                        Local = new IPAddress(la) + ":" + NetPort(Marshal.ReadUInt32(buf, o + 20)),
-                        Remote = new IPAddress(ra) + ":" + NetPort(Marshal.ReadUInt32(buf, o + 44))
+                        Local = new IPAddress(la) + ":" + NetPort(unchecked((uint)Marshal.ReadInt32(buf, o + 20))),
+                        Remote = new IPAddress(ra) + ":" + NetPort(unchecked((uint)Marshal.ReadInt32(buf, o + 44)))
                     };
                     res.Add(c);
                 }
@@ -243,7 +243,7 @@ internal static class Native
                     res.Add(new UdpSock
                     {
                         Pid = Marshal.ReadInt32(buf, o + 8),
-                        Local = Ip4(Marshal.ReadUInt32(buf, o)) + ":" + NetPort(Marshal.ReadUInt32(buf, o + 4))
+                        Local = Ip4(unchecked((uint)Marshal.ReadInt32(buf, o))) + ":" + NetPort(unchecked((uint)Marshal.ReadInt32(buf, o + 4)))
                     });
                 }
             }
@@ -257,7 +257,7 @@ internal static class Native
                     res.Add(new UdpSock
                     {
                         Pid = Marshal.ReadInt32(buf, o + 24),
-                        Local = new IPAddress(la) + ":" + NetPort(Marshal.ReadUInt32(buf, o + 20))
+                        Local = new IPAddress(la) + ":" + NetPort(unchecked((uint)Marshal.ReadInt32(buf, o + 20)))
                     });
                 }
             }
