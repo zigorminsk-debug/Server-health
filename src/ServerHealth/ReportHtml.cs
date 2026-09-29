@@ -114,7 +114,7 @@ public static class ReportHtml
           .Append("<div class=\"sub\">").Append(Enc(sys.Machine)).Append(" · ").Append(Enc(sys.CpuName)).Append(" ×").Append(sys.Cores)
           .Append(" · ОЗУ ").Append(F(sys.RamGb, "0.#")).Append(" ГБ");
         if (sys.IsVm) sb.Append(" · <span class=\"warn\">ВМ ").Append(Enc(sys.Virt)).Append("</span>");
-        sb.Append(" · ").Append(Enc(sys.Os)).Append("</div></div></div>");
+        sb.Append(" · ").Append(Enc(sys.Os)).Append("</div></div></div>")
           .Append("<div class=\"period\">Период: <b>").Append(Enc(sys.CollectedStart.ToString("dd.MM.yyyy HH:mm:ss")))
           .Append(" — ").Append(Enc(sys.CollectedEnd.ToString("HH:mm:ss"))).Append("</b> (")
           .Append(F(duration.TotalMinutes, "0.#")).Append(" мин, замеров: ").Append(samples.Count).Append(")")
