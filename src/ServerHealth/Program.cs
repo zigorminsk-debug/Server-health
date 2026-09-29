@@ -126,6 +126,7 @@ internal static class Program
     // ---------------------------------------------------------- single run
     private static int RunSingle(CliOptions opt)
     {
+        string version = typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "1.0";
         bool elevated = Native.IsElevated();
         if (!elevated)
             ConsoleUi.Warn("Запуск без прав администратора: не будут доступны соединения по процессам, открытые SMB-файлы и часть событий. Рекомендуется «Запуск от имени администратора».");

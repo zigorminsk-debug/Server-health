@@ -10,7 +10,7 @@ public static class ReportWriter
 {
     public sealed class Paths
     {
-        public string Txt, Json, Samples, Processes, Events, Dir;
+        public string Txt, Html, Json, Samples, Processes, Events, Dir;
     }
 
     private static string F(double v, string fmt = "0.#")

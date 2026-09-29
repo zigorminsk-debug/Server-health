@@ -39,6 +39,7 @@ public sealed class MainForm : Form
     private DataGridView _grid = new DataGridView();
     private TextBox _txtLog = new TextBox();
     private TabControl _tabs = new TabControl();
+    private SplitContainer _splitFindings = new SplitContainer();
     private NotifyIcon? _tray;
     private StatusStrip _status = new StatusStrip();
     private ToolStripStatusLabel _stLeft = new ToolStripStatusLabel("Остановлен");
