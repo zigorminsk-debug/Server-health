@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>ServerHealth</AssemblyName>
+    <RootNamespace>ServerHealth</RootNamespace>
+    <Version>1.3.0</Version>
+    <Product>ServerHealth</Product>
+    <Company>ServerHealth</Company>
+    <Title>ServerHealth — диагностика медленной работы терминального сервера</Title>
+    <Description>Мониторинг CPU / RAM / Disk / Network / RDS-сессий: GUI, постоянный режим, веб-отчёты с автоматическим обновлением.</Description>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Иконка приложения. Варианты в assets/icons: icon-1-pulse, icon-2-shield, icon-3-server, icon-4-gauge -->
+    <ApplicationIcon>..\..\assets\icons\icon-3-server.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Diagnostics.EventLog" Version="8.0.0" />
+  </ItemGroup>
+
+</Project>
