@@ -42,6 +42,7 @@ public sealed class MainForm : Form
     private TextBox _txtLog = new TextBox();
     private SplitContainer _splitFindings = new SplitContainer();
     private NotifyIcon? _tray;
+    private readonly ToolTip _tip = new ToolTip();
     private StatusStrip _status = new StatusStrip();
     private ToolStripStatusLabel _stLeft = new ToolStripStatusLabel("Остановлен");
     private ToolStripStatusLabel _stRight = new ToolStripStatusLabel("");
@@ -153,9 +154,11 @@ public sealed class MainForm : Form
         {
             Text = "Открывать отчёт автоматически",
             Checked = true,
-            AutoSize = true,
+            AutoSize = false,
+            Height = 22,
+            Dock = DockStyle.Top,
             ForeColor = Muted,
-            Margin = new Padding(2, 4, 2, 2)
+            TextAlign = ContentAlignment.MiddleLeft
         };
         var secParams = MakeSection("Параметры мониторинга",
             SettingRow("Интервал замера, секунд", _numInterval),
@@ -183,9 +186,10 @@ public sealed class MainForm : Form
             ForeColor = Muted,
             Font = new Font("Segoe UI", 10F, FontStyle.Bold),
             AutoSize = true,
+            Dock = DockStyle.Top,
             Margin = new Padding(2, 2, 2, 4)
         };
-        _lblCycle = new Label { Text = "Циклов: 0 · отчётов: 0", ForeColor = Muted, AutoSize = true, Margin = new Padding(2, 2, 2, 6) };
+        _lblCycle = new Label { Text = "Циклов: 0 · отчётов: 0", ForeColor = Muted, AutoSize = true, Dock = DockStyle.Top, Margin = new Padding(2, 2, 2, 6) };
         _lblVerdict = new Label
         {
             Text = "Вердикт появится после первого отчёта.",
@@ -194,7 +198,7 @@ public sealed class MainForm : Form
             MaximumSize = new Size(252, 0),
             Margin = new Padding(2, 2, 2, 2)
         };
-        var secState = MakeSection("Статус", _lblState, _lblCycle, _lblVerdict);
+        var secState = MakeSection("Статус", _lblState, _lblCycle, WrapRow(_lblVerdict));
 
         _chkTray = new CheckBox
         {
@@ -488,16 +492,20 @@ public sealed class MainForm : Form
     }
 
     // -------------------------------------------------- фабрики контролов
-    /// <summary>Секция левой колонки: подзаголовок + вертикальный поток контролов. Высота по содержимому.</summary>
+    /// <summary>
+    /// Секция левой колонки: подзаголовок + вертикальный список контролов.
+    /// Внутри — TableLayoutPanel (не FlowLayoutPanel: тот при Anchor Left|Right
+    /// схлопывает кнопки в нулевую ширину). Высота — по содержимому.
+    /// </summary>
     private static Panel MakeSection(string title, params Control[] items)
     {
         var section = new Panel
         {
-            Dock = DockStyle.Top,
+            Dock = DockStyle.Fill,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             BackColor = Section,
-            Padding = new Padding(10, 22, 10, 10),
+            Padding = new Padding(10, 24, 10, 10),
             Margin = new Padding(0, 0, 0, 8)
         };
         var caption = new Label
@@ -510,21 +518,42 @@ public sealed class MainForm : Form
             Location = new Point(10, 5),
             Margin = new Padding(0)
         };
-        var flow = new FlowLayoutPanel
+        var rows = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            FlowDirection = FlowDirection.TopDown,
-            WrapContents = false,
+            ColumnCount = 1,
             BackColor = Section,
             Margin = new Padding(0)
         };
-        foreach (var c in items) flow.Controls.Add(c);
-        // порядок добавления важен: последний Dock=Top докится первым (оказывается сверху)
-        section.Controls.Add(flow);
+        rows.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        for (int r = 0; r < items.Length; r++)
+        {
+            rows.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            items[r].Margin = new Padding(0, 1, 0, 6);
+            rows.Controls.Add(items[r], 0, r);
+        }
+        section.Controls.Add(rows);
         section.Controls.Add(caption);
         return section;
+    }
+
+    /// <summary>Строка-обёртка для переносящегося текста (Label с MaximumSize).</summary>
+    private static Control WrapRow(Label l)
+    {
+        var t = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            ColumnCount = 1,
+            BackColor = Section,
+            Margin = new Padding(0, 0, 0, 4)
+        };
+        t.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        t.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        t.Controls.Add(l, 0, 0);
+        return t;
     }
 
     /// <summary>Строка «подпись — числовое поле».</summary>
@@ -535,6 +564,7 @@ public sealed class MainForm : Form
 
         var tlp = new TableLayoutPanel
         {
+            Dock = DockStyle.Top,
             AutoSize = true,
             ColumnCount = 2,
             RowCount = 1,
@@ -557,11 +587,6 @@ public sealed class MainForm : Form
         };
         tlp.Controls.Add(lbl, 0, 0);
         tlp.Controls.Add(num, 1, 0);
-
-        // FlowLayoutPanel-родитель не растягивает по ширине Dock-контролы —
-        // задаём якорь Left|Right: ширина подстраивается под поток.
-        tlp.Anchor = AnchorStyles.Left | AnchorStyles.Right;
-        tlp.Height = Math.Max(tlp.Height, num.Height + 4);
         return tlp;
     }
 
@@ -574,9 +599,9 @@ public sealed class MainForm : Form
             BackColor = back,
             ForeColor = Color.White,
             Font = new Font("Segoe UI", bold ? 10F : 9F, bold ? FontStyle.Bold : FontStyle.Regular),
-            Height = height,
-            Margin = new Padding(0, 0, 0, 6),
-            Anchor = AnchorStyles.Left | AnchorStyles.Right,
+            Dock = DockStyle.Top,
+            MinimumSize = new Size(0, height),
+            Margin = new Padding(0, 1, 0, 6),
             UseVisualStyleBackColor = false
         };
         b.FlatAppearance.BorderSize = 0;
@@ -589,9 +614,9 @@ public sealed class MainForm : Form
     {
         var sys = MonitoringEngine.BuildSysInfo();
         Text = "ServerHealth — " + sys.Machine;
-        _lblHost.Text = sys.Machine + " · " + Trunc(sys.CpuName, 44) + " ×" + sys.Cores +
-                        " · ОЗУ " + sys.RamGb.ToString("0.#") + " ГБ" +
+        _lblHost.Text = sys.Machine + " · " + sys.Cores + " лог. ядер · ОЗУ " + sys.RamGb.ToString("0.#") + " ГБ" +
                         (sys.Elevated ? "" : " · БЕЗ ПРАВ АДМИНИСТРАТОРА");
+        try { _tip.SetToolTip(_lblHost, sys.CpuName + " ×" + sys.Cores); } catch { }
         _chart.SetRam(sys.RamGb);
     }
 
