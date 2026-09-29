@@ -1,0 +1,17 @@
+## .NET
+bin/
+obj/
+out/
+publish/
+*.user
+*.suo
+.vs/
+
+## Артефакты локальных запусков ServerHealth
+ServerHealth_*/
+
+## Прочее
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
