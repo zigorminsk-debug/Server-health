@@ -26,11 +26,12 @@ public static class ReportWriter
         string dir, SysInfo sys, List<SystemSample> samples, List<ProcAgg> procs,
         List<EventGroup> events, List<SessionInfo> sessions, TcpSummary tcp,
         OpenFilesSummary openFiles, AnalysisResult analysis, TimeSpan duration,
-        string knownProcsNote, bool writeJson = true)
+        string knownProcsNote, bool writeJson = true, int htmlRefreshSec = 0)
     {
         Directory.CreateDirectory(dir);
         var paths = new Paths { Dir = dir };
         paths.Txt = Path.Combine(dir, "report.txt");
+        paths.Html = Path.Combine(dir, "report.html");
         paths.Json = writeJson ? Path.Combine(dir, "report.json") : "";
         paths.Samples = Path.Combine(dir, "samples.csv");
         paths.Processes = Path.Combine(dir, "processes.csv");
@@ -41,6 +42,11 @@ public static class ReportWriter
         WriteEventsCsv(paths.Events, events);
         if (writeJson)
             WriteJson(paths.Json, sys, samples, procs, events, sessions, tcp, openFiles, analysis, duration);
+        try
+        {
+            ReportHtml.Write(paths.Html, sys, samples, procs, events, tcp, openFiles, analysis, duration, paths, htmlRefreshSec);
+        }
+        catch { /* HTML не критичен: TXT/CSV уже записаны */ }
         WriteTxt(paths.Txt, sys, samples, procs, events, sessions, tcp, openFiles, analysis, duration, knownProcsNote);
         return paths;
     }

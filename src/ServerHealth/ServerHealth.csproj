@@ -5,16 +5,19 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>disable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>ServerHealth</AssemblyName>
     <RootNamespace>ServerHealth</RootNamespace>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <Product>ServerHealth</Product>
     <Company>ServerHealth</Company>
     <Title>ServerHealth — диагностика медленной работы терминального сервера</Title>
-    <Description>Сбор и анализ метрик CPU / RAM / Disk / Network / RDS-сессий с формированием отчёта и инструкций по устранению причин зависаний.</Description>
+    <Description>Мониторинг CPU / RAM / Disk / Network / RDS-сессий: GUI, постоянный режим, веб-отчёты с автоматическим обновлением.</Description>
     <InvariantGlobalization>true</InvariantGlobalization>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Иконка приложения. Варианты в assets/icons: icon-1-pulse, icon-2-shield, icon-3-server, icon-4-gauge -->
+    <ApplicationIcon>..\..\assets\icons\icon-3-server.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>

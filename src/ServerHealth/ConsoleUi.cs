@@ -20,28 +20,39 @@ public static class ConsoleUi
     public static void Help()
     {
         Console.WriteLine("Использование:");
-        Console.WriteLine("  ServerHealth.exe [параметры]");
+        Console.WriteLine("  ServerHealth.exe              — графический интерфейс (мониторинг + отчёты)");
+        Console.WriteLine("  ServerHealth.exe [параметры]  — консольный режим");
+        Console.WriteLine();
+        Console.WriteLine("Режимы:");
+        Console.WriteLine("  -g, --gui               открыть GUI");
+        Console.WriteLine("  -w, --watch [мин]       постоянный мониторинг: отчёт каждые N минут (по умолчанию 10)");
+        Console.WriteLine("      (без параметров и без -w выполняется разовый замер)");
         Console.WriteLine();
         Console.WriteLine("Параметры:");
-        Console.WriteLine("  -d, --duration  <мин>   длительность наблюдения в минутах (по умолчанию 10, дробные допустимы)");
+        Console.WriteLine("  -d, --duration  <мин>   длительность разового наблюдения в минутах (по умолчанию 10)");
         Console.WriteLine("  -i, --interval  <сек>   интервал замера в секундах (по умолчанию 5, минимум 1)");
-        Console.WriteLine("  -o, --out       <путь>  каталог для отчёта (по умолчанию .\\ServerHealth_ГГГГММДД_ЧЧММСС)");
+        Console.WriteLine("  -o, --out       <путь>  каталог для отчёта");
+        Console.WriteLine("      --keep      <N>     хранить N последних отчётов (0 = все), для --watch и GUI");
         Console.WriteLine("      --events-hours <ч>  сколько часов журнала событий анализировать (по умолчанию 24, 0 = не читать)");
         Console.WriteLine("      --quick             быстрый замер: 1 минута с интервалом 2 с");
         Console.WriteLine("      --no-json           не создавать report.json");
+        Console.WriteLine("      --no-open           не открывать report.html после разового замера");
         Console.WriteLine("  -q, --quiet             без живого вывода прогресса");
         Console.WriteLine("  -h, --help              эта справка");
         Console.WriteLine("  --version               версия");
         Console.WriteLine();
         Console.WriteLine("Примеры:");
-        Console.WriteLine("  ServerHealth.exe                       — 10 минут мониторинга, отчёт в текущем каталоге");
-        Console.WriteLine("  ServerHealth.exe -d 30 -i 10 -o D:\\logs — 30 минут, замер раз в 10 с, в D:\\logs");
-        Console.WriteLine("  ServerHealth.exe --quick               — быстрая проверка на 1 минуту");
+        Console.WriteLine("  ServerHealth.exe                          — GUI");
+        Console.WriteLine("  ServerHealth.exe -d 30 -i 10 -o D:\\logs   — разовый замер 30 минут в консоли");
+        Console.WriteLine("  ServerHealth.exe --watch                  — постоянный мониторинг, отчёт каждые 10 минут");
+        Console.WriteLine("  ServerHealth.exe --watch 5 --keep 48      — отчёт каждые 5 минут, хранить 48 (4 часа)");
+        Console.WriteLine("  ServerHealth.exe --quick                  — быстрая проверка на 1 минуту");
         Console.WriteLine();
-        Console.WriteLine("Запускать ПРАВОЙ кнопкой -> «Запуск от имени администратора» — иначе часть данных");
-        Console.WriteLine("(соединения по процессам, открытые файлы, часть событий) будет недоступна.");
+        Console.WriteLine("Каждый цикл формирует папку с отчётами: report.html (веб-страница с графиками),");
+        Console.WriteLine("report.txt, report.json, samples.csv, processes.csv, events.csv.");
         Console.WriteLine();
-        Console.WriteLine("Во время работы: Ctrl+C — завершить досрочно и всё равно сформировать отчёт.");
+        Console.WriteLine("Запускать от имени администратора — иначе часть данных недоступна.");
+        Console.WriteLine("Во время работы: Ctrl+C — остановить (для разового замера отчёт всё равно сформируется).");
         Console.WriteLine("Коды возврата: 0 — ок; 2 — найдены критические проблемы; 1 — ошибка запуска.");
     }
 
@@ -117,7 +128,8 @@ public static class ConsoleUi
         }
         Console.WriteLine();
         Console.WriteLine("  Отчёты сохранены в: " + paths.Dir);
-        Console.WriteLine("    " + Path.GetFileName(paths.Txt) + "        — полный отчёт с инструкциями (открыть первым)");
+        Console.WriteLine("    " + Path.GetFileName(paths.Html) + "     — веб-отчёт с графиками (откроется в браузере)");
+        Console.WriteLine("    " + Path.GetFileName(paths.Txt) + "        — полный отчёт с инструкциями (текст)");
         if (!string.IsNullOrEmpty(paths.Json)) Console.WriteLine("    " + Path.GetFileName(paths.Json) + "      — данные для автоматизации");
         Console.WriteLine("    samples.csv / processes.csv / events.csv — исходные данные");
         Console.WriteLine();

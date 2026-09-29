@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
+using System.Windows.Forms;
 using ServerHealth.Interop;
 
 namespace ServerHealth;
@@ -8,6 +10,7 @@ internal static class Program
 {
     private static volatile bool _stop;
 
+    [STAThread]
     private static int Main(string[] args)
     {
         try { Console.OutputEncoding = Encoding.UTF8; } catch { }
@@ -23,7 +26,23 @@ internal static class Program
 
         string version = typeof(Program).Assembly.GetName().Version?.ToString(3) ?? "1.0";
         if (opt.ShowVersion) { Console.WriteLine("ServerHealth " + version); return 0; }
-        if (opt.ShowHelp) { ConsoleUi.Banner(version); ConsoleUi.Help(); return 0; }
+        if (opt.ShowHelp && !opt.Gui) { ConsoleUi.Banner(version); ConsoleUi.Help(); return 0; }
+
+        // графический интерфейс (по умолчанию без аргументов, либо -g/--gui)
+        if (opt.Gui)
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                ConsoleUi.Error("GUI доступен только в Windows.");
+                return 1;
+            }
+            FreeAutoConsole(); // при запуске двойным кликом убираем лишнее консольное окно
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+            try { Application.SetHighDpiMode(HighDpiMode.PerMonitorV2); } catch { }
+            Application.Run(new Gui.MainForm(opt));
+            return 0;
+        }
 
         ConsoleUi.Banner(version);
 
@@ -33,12 +52,86 @@ internal static class Program
             return 1;
         }
 
+        // постоянный мониторинг: отчёт каждые N минут
+        if (opt.Watch)
+            return RunWatch(opt);
+
+        return RunSingle(opt);
+    }
+
+    // ------------------------------------------------------ консоль/GUI
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetConsoleWindow();
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetConsoleProcessList(uint[] processList, uint processCount);
+
+    [DllImport("kernel32.dll")]
+    private static extern bool FreeConsole();
+
+    /// <summary>
+    /// Если консоль была автоматически создана для нас (запуск двойным кликом) — освободить её,
+    /// чтобы не висело пустое окно рядом с GUI. Терминал пользователя не трогаем.
+    /// </summary>
+    private static void FreeAutoConsole()
+    {
+        try
+        {
+            IntPtr h = GetConsoleWindow();
+            if (h == IntPtr.Zero) return;
+            var buf = new uint[1];
+            uint n = GetConsoleProcessList(buf, 1);
+            if (n == 1) FreeConsole();
+        }
+        catch { }
+    }
+
+    // ------------------------------------------------------------ watch
+    private static int RunWatch(CliOptions opt)
+    {
+        if (!Native.IsElevated())
+            ConsoleUi.Warn("Запуск без прав администратора: соединения по процессам, открытые SMB-файлы и часть событий будут недоступны.");
+
+        var engine = new MonitoringEngine(new MonitoringOptions
+        {
+            IntervalSec = opt.IntervalSec,
+            CycleMinutes = opt.WatchCycleMin,
+            EventsHours = opt.EventsHours,
+            OutRoot = opt.OutDir ?? "",
+            KeepReports = opt.KeepReports,
+            HtmlRefreshSec = 30
+        });
+
+        engine.Log += m => Console.WriteLine("  " + m);
+        engine.CycleCompleted += r =>
+        {
+            Console.WriteLine();
+            Console.WriteLine("════════ ОТЧЁТ #" + r.CycleNumber + " ════════");
+            Console.WriteLine("  Каталог : " + r.Dir);
+            Console.WriteLine("  Веб     : " + Path.Combine(r.Dir, "report.html"));
+            Console.WriteLine("  Вердикт : " + r.VerdictTitle);
+            if (r.Analysis != null)
+                foreach (var s in r.Analysis.Scores)
+                    Console.WriteLine(string.Format("  {0,-18} {1,3}/100", s.Key, s.Value));
+            Console.WriteLine();
+        };
+
+        Console.CancelKeyPress += (s, e) => { e.Cancel = true; engine.Stop(); };
+        engine.Start();
+        while (engine.State != MonitorState.Idle)
+            Thread.Sleep(400);
+        return 0;
+    }
+
+    // ---------------------------------------------------------- single run
+    private static int RunSingle(CliOptions opt)
+    {
         bool elevated = Native.IsElevated();
         if (!elevated)
             ConsoleUi.Warn("Запуск без прав администратора: не будут доступны соединения по процессам, открытые SMB-файлы и часть событий. Рекомендуется «Запуск от имени администратора».");
 
         // ---------- каталог отчёта ----------
-        string outDir = opt.OutDir;
+        string outDir = opt.DefaultSingleOutDir();
         try { Directory.CreateDirectory(outDir); }
         catch (Exception ex) { ConsoleUi.Error("Не удалось создать каталог отчёта " + outDir + ": " + ex.Message); return 1; }
 

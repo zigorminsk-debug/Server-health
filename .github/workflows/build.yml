@@ -38,7 +38,7 @@ jobs:
       - name: Публикация (один самодостаточный exe)
         shell: pwsh
         run: |
-          $ver = "1.0.$($env:GITHUB_RUN_NUMBER)"
+          $ver = "1.1.$($env:GITHUB_RUN_NUMBER)"
           dotnet publish src/ServerHealth/ServerHealth.csproj `
             -c Release -r win-x64 --self-contained true `
             -p:PublishSingleFile=true `
