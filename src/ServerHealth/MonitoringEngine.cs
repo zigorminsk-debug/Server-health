@@ -73,6 +73,8 @@ public sealed class MonitoringEngine : IDisposable
     public DateTime NextReportAt { get; private set; }
     public CycleResult? Last { get; private set; }
     public string OutRoot { get; private set; }
+    /// <summary>Последняя живая точка (обновляется на каждом замере, потокобезопасно).</summary>
+    public LivePoint? LastPoint { get; private set; }
     /// <summary>Путь к постоянному дашборду (dashboard.html — всегда последний цикл).</summary>
     public string? DashboardPath { get; private set; }
 
@@ -426,6 +428,7 @@ public sealed class MonitoringEngine : IDisposable
             _live.Add(p);
             if (_live.Count > 20000) _live.RemoveRange(0, 5000);
         }
+        LastPoint = p;
         return p;
     }
 

@@ -642,7 +642,6 @@ public sealed class MainForm : Form
         };
         _engine = new MonitoringEngine(opts);
         _engine.Log += m => BeginInvoke(new Action(() => AppendLog(m)));
-        _engine.Tick += p => BeginInvoke(new Action(() => OnTick(p)));
         _engine.CycleCompleted += r => BeginInvoke(new Action(() => OnCycle(r)));
         _engine.CriticalDetected += msg =>
         {
@@ -712,22 +711,26 @@ public sealed class MainForm : Form
     }
 
     // ------------------------------------------------------------- события
-    private void OnTick(LivePoint p)
+    /// <summary>Живые значения карточек — вызывается из секундного таймера UI,
+    /// данные берутся напрямую из движка (без промежуточных событий).</summary>
+    private void UpdateCards(LivePoint p)
     {
-        // живые значения карточек — с первого же замера, не дожидаясь отчёта
         double ramMbTotal = _ramGb * 1024.0;
         double freePct = ramMbTotal > 0 ? p.AvailMb / ramMbTotal * 100.0 : 100.0;
 
-        _scCpu.SetLive(p.Cpu.ToString("0") + " %", (int)Math.Clamp(p.Cpu, 0, 100), "загрузка процессора");
-        _scRam.SetLive((p.AvailMb / 1024.0).ToString("0.#") + " ГБ",
-            (int)Math.Clamp(100 - freePct, 0, 100),
-            "свободно из " + _ramGb.ToString("0.#") + " ГБ");
-        _scDisk.SetLive(p.DiskLatMaxMs.ToString("0.#") + " мс",
-            (int)Math.Clamp(p.DiskLatMaxMs * 2, 0, 100),
-            "макс. задержка диска");
-        _scNet.SetLive(p.NetMbps.ToString("0") + " Мбит/с", -1, "приём + передача");
+        double cpu = double.IsNaN(p.Cpu) ? 0 : p.Cpu;
+        double avail = double.IsNaN(p.AvailMb) ? 0 : p.AvailMb;
+        double lat = double.IsNaN(p.DiskLatMaxMs) ? 0 : p.DiskLatMaxMs;
+        double net = double.IsNaN(p.NetMbps) ? 0 : p.NetMbps;
 
-        if (_engine != null) _chart.UpdateData(_engine.LiveSnapshot());
+        _scCpu.SetLive(cpu.ToString("0") + " %", (int)Math.Round(Math.Clamp(cpu, 0, 100)), "загрузка процессора");
+        _scRam.SetLive((avail / 1024.0).ToString("0.#") + " ГБ",
+            (int)Math.Round(Math.Clamp(100 - freePct, 0, 100)),
+            "свободно из " + _ramGb.ToString("0.#") + " ГБ");
+        _scDisk.SetLive(lat.ToString("0.#") + " мс",
+            (int)Math.Round(Math.Clamp(lat * 2, 0, 100)),
+            "макс. задержка диска");
+        _scNet.SetLive(net.ToString("0") + " Мбит/с", -1, "приём + передача");
     }
 
     private void OnCycle(CycleResult r)
@@ -836,6 +839,10 @@ public sealed class MainForm : Form
                          " · до отчёта: " + leftStr;
         _stLeft.Text = "Мониторинг идёт";
         _stRight.Text = "отчётов: " + eng.ReportsDone + " · каталог: " + Trunc(eng.OutRoot, 60);
+
+        // карточки и график — напрямую из состояния движка, каждый тик (1 раз в секунду)
+        if (eng.LastPoint != null)
+            UpdateCards(eng.LastPoint);
         _chart.UpdateData(eng.LiveSnapshot());
     }
 
