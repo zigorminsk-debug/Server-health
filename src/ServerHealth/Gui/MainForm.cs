@@ -471,7 +471,7 @@ public sealed class MainForm : Form
         content.Dock = DockStyle.Fill;
         content.Visible = false;
         host.Controls.Add(content);
-        _tabPages.Add(content);
+        _tabPages.Add((Panel)content);
     }
 
     private void ShowTab(int index)
