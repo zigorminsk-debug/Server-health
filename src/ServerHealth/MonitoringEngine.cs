@@ -371,7 +371,7 @@ public sealed class MonitoringEngine : IDisposable
         });
 
         string dir = Path.Combine(OutRoot, "ServerHealth_" + Sys.CollectedStart.ToString("yyyyMMdd_HHmmss"));
-        var files = ReportWriter.Write(dir, Sys, samples, agg, evGroups, sessions, tcpSummary,
+        var written = ReportWriter.Write(dir, Sys, samples, agg, evGroups, sessions, tcpSummary,
             openFilesSummary, analysis, duration, "", writeJson: true, htmlRefreshSec: _o.HtmlRefreshSec);
 
         return new CycleResult
@@ -379,7 +379,7 @@ public sealed class MonitoringEngine : IDisposable
             CycleNumber = CycleNumber,
             Finished = DateTime.Now,
             Dir = dir,
-            Files = files,
+            Files = written,
             Analysis = analysis,
             Samples = samples.Count,
             Duration = duration,
