@@ -296,7 +296,7 @@ public sealed class MainForm : Form
         split.Panel2.Controls.Add(_txtFinding);
         tabFindings.Controls.Add(split);
 
-        var tabProcs = new TabPage("Процессы (топ CPU за цикл)");
+        var tabProcs = new TabPage("Процессы (топ CPU за цикл)") { BackColor = Color.FromArgb(20, 20, 31) };
         _grid = new DataGridView
         {
             Dock = DockStyle.Fill,
@@ -328,7 +328,7 @@ public sealed class MainForm : Form
         _grid.Columns.Add("c8", "Зависал");
         tabProcs.Controls.Add(_grid);
 
-        var tabLog = new TabPage("Журнал");
+        var tabLog = new TabPage("Журнал") { BackColor = Color.FromArgb(20, 20, 31) };
         _txtLog = new TextBox
         {
             Dock = DockStyle.Fill,

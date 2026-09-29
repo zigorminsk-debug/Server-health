@@ -319,8 +319,8 @@ public sealed class MonitoringEngine : IDisposable
             }
 
             TickCount++;
-            AddLive(sample);
-            try { Tick?.Invoke(sample); } catch { }
+            var livePoint = AddLive(sample);
+            try { Tick?.Invoke(livePoint); } catch { }
 
             int remain = _o.IntervalSec * 1000 - (int)tickSw.ElapsedMilliseconds;
             int slept = 0;
@@ -389,7 +389,7 @@ public sealed class MonitoringEngine : IDisposable
         };
     }
 
-    private void AddLive(SystemSample s)
+    private LivePoint AddLive(SystemSample s)
     {
         var p = new LivePoint
         {
@@ -407,6 +407,7 @@ public sealed class MonitoringEngine : IDisposable
             _live.Add(p);
             if (_live.Count > 20000) _live.RemoveRange(0, 5000);
         }
+        return p;
     }
 
     private void PruneOldReports()
