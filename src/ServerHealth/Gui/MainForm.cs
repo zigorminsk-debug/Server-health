@@ -43,6 +43,8 @@ public sealed class MainForm : Form
     private SplitContainer _splitFindings = new SplitContainer();
     private NotifyIcon? _tray;
     private readonly ToolTip _tip = new ToolTip();
+    private SysInfo _sysStatic = new SysInfo();
+    private double _ramGb = 16;
     private StatusStrip _status = new StatusStrip();
     private ToolStripStatusLabel _stLeft = new ToolStripStatusLabel("Остановлен");
     private ToolStripStatusLabel _stRight = new ToolStripStatusLabel("");
@@ -76,6 +78,9 @@ public sealed class MainForm : Form
             if (big != null) Icon = new Icon(big, 32, 32);
         }
         catch { }
+
+        _sysStatic = OperatingSystem.IsWindows() ? MonitoringEngine.BuildSysInfo() : new SysInfo();
+        _ramGb = _sysStatic.RamGb > 0 ? _sysStatic.RamGb : 16;
 
         BuildUi();
 
@@ -303,7 +308,7 @@ public sealed class MainForm : Form
             ColumnCount = 2,
             RowCount = 1,
             BackColor = Color.FromArgb(24, 24, 36),
-            Padding = new Padding(12, 4, 12, 4),
+            Padding = new Padding(12, 4, 18, 4),
             Margin = new Padding(0)
         };
         header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -612,12 +617,12 @@ public sealed class MainForm : Form
     // ------------------------------------------------------------- прочее
     private void UpdateHostLabel()
     {
-        var sys = MonitoringEngine.BuildSysInfo();
+        var sys = _sysStatic;
         Text = "ServerHealth — " + sys.Machine;
         _lblHost.Text = sys.Machine + " · " + sys.Cores + " лог. ядер · ОЗУ " + sys.RamGb.ToString("0.#") + " ГБ" +
                         (sys.Elevated ? "" : " · БЕЗ ПРАВ АДМИНИСТРАТОРА");
         try { _tip.SetToolTip(_lblHost, sys.CpuName + " ×" + sys.Cores); } catch { }
-        _chart.SetRam(sys.RamGb);
+        _chart.SetRam(_ramGb);
     }
 
     private static string Trunc(string s, int n) { return string.IsNullOrEmpty(s) ? "" : (s.Length <= n ? s : s.Substring(0, n - 1) + "…"); }
@@ -706,8 +711,20 @@ public sealed class MainForm : Form
     // ------------------------------------------------------------- события
     private void OnTick(LivePoint p)
     {
-        if (_engine == null) return;
-        _chart.UpdateData(_engine.LiveSnapshot());
+        // живые значения карточек — с первого же замера, не дожидаясь отчёта
+        double ramMbTotal = _ramGb * 1024.0;
+        double freePct = ramMbTotal > 0 ? p.AvailMb / ramMbTotal * 100.0 : 100.0;
+
+        _scCpu.SetLive(p.Cpu.ToString("0") + " %", (int)Math.Clamp(p.Cpu, 0, 100), "загрузка процессора");
+        _scRam.SetLive((p.AvailMb / 1024.0).ToString("0.#") + " ГБ",
+            (int)Math.Clamp(100 - freePct, 0, 100),
+            "свободно из " + _ramGb.ToString("0.#") + " ГБ");
+        _scDisk.SetLive(p.DiskLatMaxMs.ToString("0.#") + " мс",
+            (int)Math.Clamp(p.DiskLatMaxMs * 2, 0, 100),
+            "макс. задержка диска");
+        _scNet.SetLive(p.NetMbps.ToString("0") + " Мбит/с", -1, "приём + передача");
+
+        if (_engine != null) _chart.UpdateData(_engine.LiveSnapshot());
     }
 
     private void OnCycle(CycleResult r)
@@ -715,15 +732,15 @@ public sealed class MainForm : Form
         if (r.Analysis != null)
         {
             int i = 0;
-            foreach (var s in r.Analysis.Scores)
-            {
-                string cap = s.Value >= 70 ? "норма" : s.Value >= 40 ? "проблема" : "критично";
-                var card = i switch { 0 => _scCpu, 1 => _scRam, 2 => _scDisk, _ => _scNet };
-                card.Set(s.Value, cap);
-                i++;
-            }
             _lblVerdict.Text = Trunc(r.VerdictTitle, 400);
             _lblVerdict.ForeColor = r.HasCritical ? Color.FromArgb(224, 108, 117) : Color.FromArgb(185, 185, 205);
+            foreach (var s in r.Analysis.Scores)
+            {
+                string word = s.Value >= 70 ? "норма" : s.Value >= 40 ? "проблема" : "критично";
+                var card = i switch { 0 => _scCpu, 1 => _scRam, 2 => _scDisk, _ => _scNet };
+                card.SetScore(s.Value, word);
+                i++;
+            }
         }
         _lstFindings.BeginUpdate();
         _lstFindings.Items.Clear();
