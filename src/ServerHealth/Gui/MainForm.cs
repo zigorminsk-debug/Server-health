@@ -178,7 +178,6 @@ public sealed class MainForm : Form
         _btnStop.Enabled = false;
         _btnStop.Click += (s, e) => StopMonitoring();
         _btnReport = FlatBtn("🌐  Открыть веб-отчёт (браузер)", Color.FromArgb(52, 52, 76), 30);
-        _btnReport.Enabled = false;
         _btnReport.Click += (s, e) => OpenLastReport();
         _btnFolder = FlatBtn("📂  Папка отчётов", Color.FromArgb(52, 52, 76), 30);
         _btnFolder.Click += (s, e) => OpenFolder();
@@ -684,12 +683,20 @@ public sealed class MainForm : Form
             path = _engine?.Last?.Files?.Html;
         if (path == null || !File.Exists(path))
         {
-            MessageBox.Show("Отчёт ещё не сформирован — дождитесь окончания первого цикла.", "ServerHealth",
+            MessageBox.Show("Отчёт ещё не сформирован. Первый отчёт появится через " +
+                _numCycle.Value + " мин после запуска мониторинга" +
+                "\n(файл dashboard.html в папке отчётов).", "ServerHealth",
                 MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
-        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path) { UseShellExecute = true }); }
-        catch (Exception ex) { MessageBox.Show("Не удалось открыть: " + ex.Message); }
+        AppendLog("Открываю в браузере: " + path);
+        if (!WebOpen.Open(path))
+        {
+            // крайний случай: показать файл в проводнике, чтобы открыть вручную
+            try { System.Diagnostics.Process.Start("explorer.exe", "/select,\"" + path + "\""); } catch { }
+            MessageBox.Show("Браузер по умолчанию не найден. Файл отчёта показан в проводнике — откройте его вручную:\n" + path,
+                "ServerHealth", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+        }
     }
 
     private void OpenFolder()
@@ -778,17 +785,13 @@ public sealed class MainForm : Form
                 p.PrivLastMb.ToString("0"), p.GrowthMbPerHour(r.Duration).ToString("+0;-0;0"),
                 (p.ReadMbpsAvg + p.WriteMbpsAvg).ToString("0.#"),
                 p.HungCount > 0 ? "ДА (" + p.HungCount + ")" : "");
-        _btnReport.Enabled = r.Files != null;
         AppendLog("Готов отчёт #" + r.CycleNumber + ": " + r.Dir);
         if (_chkOpen.Checked)
         {
             string? toOpen = _engine?.DashboardPath;
             if (toOpen == null || !File.Exists(toOpen)) toOpen = r.Files?.Html;
             if (toOpen != null && File.Exists(toOpen))
-            {
-                try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(toOpen) { UseShellExecute = true }); }
-                catch { }
-            }
+                WebOpen.Open(toOpen);
         }
     }
 

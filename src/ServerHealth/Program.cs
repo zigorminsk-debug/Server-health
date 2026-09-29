@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Forms;
+using ServerHealth.Gui;
 using ServerHealth.Interop;
 
 namespace ServerHealth;
@@ -119,8 +120,7 @@ internal static class Program
             // автооткрытие веб-отчёта в браузере (одна страница-дашборд на всё время работы)
             if (!opt.NoOpen && engine.DashboardPath != null && File.Exists(engine.DashboardPath))
             {
-                try { Process.Start(new ProcessStartInfo(engine.DashboardPath) { UseShellExecute = true }); }
-                catch { }
+                WebOpen.Open(engine.DashboardPath);
             }
         };
 
