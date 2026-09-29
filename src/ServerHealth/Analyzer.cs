@@ -354,7 +354,7 @@ public static class Analyzer
                 Verify = { "Pages/sec < 50 в среднем после изменений." }
             });
         }
-        if (poolNp.Max > 1.5L * 1024 * 1024 * 1024)
+        if (poolNp.Max > 1.5 * 1073741824L)
         {
             r.Findings.Add(new Finding
             {
