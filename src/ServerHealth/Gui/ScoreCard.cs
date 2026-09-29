@@ -4,9 +4,9 @@ using System.Windows.Forms;
 namespace ServerHealth.Gui;
 
 /// <summary>
-/// Карточка подсистемы: крупное текущее значение (обновляется на каждом замере,
-/// с первых секунд работы), полоса нагрузки и бейдж «оценка цикла 0–100» после
-/// формирования отчёта.
+/// Карточка подсистемы: живое значение + полоса нагрузки + бейдж оценки цикла.
+/// Компоновка рассчитывается от измеренной высоты текста и текущего DPI
+/// (DeviceDpi), поэтому ничего не обрезается ни при 100%, ни при 125–200%.
 /// </summary>
 public sealed class ScoreCard : Panel
 {
@@ -15,7 +15,7 @@ public sealed class ScoreCard : Panel
     private string _big = "—";
     private string _caption = "ожидание данных…";
     private int _load = -1;                 // 0..100, -1 = полоса не показывается
-    private string? _scoreNote;             // «оценка цикла: 87/100 · норма»
+    private string? _scoreNote;             // «оценка 87/100 · норма»
     private Color _scoreColor = MutedColor;
 
     private static readonly Color CardColor = Color.FromArgb(30, 30, 44);
@@ -49,12 +49,31 @@ public sealed class ScoreCard : Panel
         Invalidate();
     }
 
-    /// <summary>Оценка цикла (показывается в правом нижнем углу, живые значения продолжают обновляться).</summary>
+    /// <summary>Оценка цикла (правый нижний угол; живые значения продолжают обновляться).</summary>
     public void SetScore(int score, string word)
     {
         _scoreNote = "оценка " + score + "/100 · " + word;
         _scoreColor = score >= 70 ? Ok : score >= 40 ? Warn : Bad;
         Invalidate();
+    }
+
+    private int TitleH { get { return TextRenderer.MeasureText("Ag", FTitle).Height; } }
+    private int BigH { get { return TextRenderer.MeasureText("Ag", FBig).Height; } }
+    private int CapH { get { return TextRenderer.MeasureText("Ag", FCap).Height; } }
+    private float K { get { return DeviceDpi / 96f; } }
+
+    /// <summary>Естественная высота карточки при текущем DPI и шрифтах.</summary>
+    private int NeededHeight()
+    {
+        int pad = (int)(12 * K);
+        int gap = (int)(5 * K);
+        int barH = Math.Max(4, (int)(6 * K));
+        return pad / 2 + TitleH + gap + BigH + gap + barH + gap + CapH + pad;
+    }
+
+    protected override Size GetPreferredSize(Size proposed)
+    {
+        return new Size(140, NeededHeight());
     }
 
     protected override void OnPaint(PaintEventArgs e)
@@ -66,17 +85,33 @@ public sealed class ScoreCard : Panel
         using (var bg = new SolidBrush(CardColor)) g.FillRectangle(bg, 0, 0, W, H);
         using (var p = new Pen(LineColor)) g.DrawRectangle(p, 0, 0, W - 1, H - 1);
 
+        float k = K;
+        int pad = (int)(12 * k);
+        int gap = (int)(5 * k);
+        int barH = Math.Max(4, (int)(6 * k));
+
+        // если карточка сжата сильнее естественной высоты — рисуем без полосы и подписи
+        bool compact = H < NeededHeight() - gap;
+
+        int y = pad / 2;
+
         // заголовок
-        TextRenderer.DrawText(g, Title, FTitle, new Rectangle(12, 7, W - 24, 18), MutedColor,
+        int th = compact ? TitleH : TitleH;
+        TextRenderer.DrawText(g, Title, FTitle, new Rectangle(pad, y, W - 2 * pad, th), MutedColor,
             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+        y += th + gap;
 
         // крупное текущее значение
-        TextRenderer.DrawText(g, _big, FBig, new Rectangle(12, 25, W - 24, 36), TextColor,
-            TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+        int bh = Math.Max(10, H - y - gap - (compact ? gap : gap + barH + gap + CapH) - pad / 2);
+        TextRenderer.DrawText(g, _big, FBig, new Rectangle(pad, y, W - 2 * pad, Math.Min(BigH, bh)),
+            TextColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
+        y += BigH + gap;
+
+        if (compact) return;
 
         // полоса нагрузки
-        int barY = H - 31;
-        var barRect = new Rectangle(12, barY, Math.Max(10, W - 24), 6);
+        int barY = Math.Max(y, H - pad / 2 - CapH - gap - barH);
+        var barRect = new Rectangle(pad, barY, Math.Max(10, W - 2 * pad), barH);
         using (var barBg = new SolidBrush(BarBg)) g.FillRectangle(barBg, barRect);
         if (_load > 0)
         {
@@ -87,7 +122,7 @@ public sealed class ScoreCard : Panel
         }
 
         // подпись слева + оценка цикла справа
-        var capRect = new Rectangle(12, H - 22, W - 24, 17);
+        var capRect = new Rectangle(pad, barRect.Bottom + gap, W - 2 * pad, CapH);
         TextRenderer.DrawText(g, _caption, FCap, capRect, MutedColor,
             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
         if (_scoreNote != null)

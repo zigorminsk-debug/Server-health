@@ -412,16 +412,29 @@ public sealed class MonitoringEngine : IDisposable
 
     private LivePoint AddLive(SystemSample s)
     {
+        // NaN сохраняем осознанно: «счётчика нет» и «значение 0» — разные вещи
+        double diskLat = double.NaN;
+        if (s.Physical.Count > 0)
+        {
+            var vals = new List<double>();
+            foreach (var d in s.Physical)
+            {
+                if (!double.IsNaN(d.LatReadMs)) vals.Add(d.LatReadMs);
+                if (!double.IsNaN(d.LatWriteMs)) vals.Add(d.LatWriteMs);
+            }
+            if (vals.Count > 0) diskLat = vals.Max();
+        }
+
         var p = new LivePoint
         {
             Ts = s.Ts,
-            Cpu = double.IsNaN(s.CpuTotal) ? 0 : s.CpuTotal,
-            AvailMb = double.IsNaN(s.AvailMb) ? 0 : s.AvailMb,
+            Cpu = s.CpuTotal,
+            AvailMb = s.AvailMb,
             NetMbps = s.Nets.Sum(n => (double.IsNaN(n.RxMbps) ? 0 : n.RxMbps) + (double.IsNaN(n.TxMbps) ? 0 : n.TxMbps)),
-            DiskLatMaxMs = s.Physical.Count == 0 ? 0 : s.Physical.Max(d => double.IsNaN(d.LatReadMs) ? 0 : Math.Max(d.LatReadMs, double.IsNaN(d.LatWriteMs) ? 0 : d.LatWriteMs)),
-            DiskQueueAvg = s.Physical.Count == 0 ? 0 : s.Physical.Average(d => double.IsNaN(d.QueueCur) ? 0 : d.QueueCur),
+            DiskLatMaxMs = diskLat,
+            DiskQueueAvg = s.Physical.Count == 0 ? double.NaN : s.Physical.Average(d => double.IsNaN(d.QueueCur) ? 0 : d.QueueCur),
             TcpEst = s.TcpEstablished,
-            ProcQueue = double.IsNaN(s.ProcQueueLen) ? 0 : s.ProcQueueLen
+            ProcQueue = s.ProcQueueLen
         };
         lock (_liveLock)
         {

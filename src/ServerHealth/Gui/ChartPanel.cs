@@ -105,8 +105,19 @@ public sealed class ChartPanel : Panel
         g.FillRectangle(BgBrush, r);
         g.DrawRectangle(BorderPen, r);
 
+        // все отступы и колонки — от текущего DPI: текст (pt) растёт вместе с DPI,
+        // пиксельные рамки масштабируем вместе с ним, иначе текст обрезается
+        float k = DeviceDpi / 96f;
+        int pad = (int)(10 * k);
+        int headH = Math.Max(
+            TextRenderer.MeasureText("Ag", FTitle).Height,
+            TextRenderer.MeasureText("Ag", FValue).Height) + (int)(8 * k);
+        int axisW = TextRenderer.MeasureText("8888", FAxis).Width + (int)(16 * k);
+        int axisH = TextRenderer.MeasureText("Ag", FAxis).Height + 2;
+        int timeH = showTime ? TextRenderer.MeasureText("Ag", FTime).Height + (int)(8 * k) : (int)(8 * k);
+
         // ---- шапка: заголовок слева, текущее значение справа (не поверх линии)
-        var head = new Rectangle(r.X + 10, r.Y + 5, r.Width - 20, 20);
+        var head = new Rectangle(r.X + pad, r.Y + (int)(4 * k), r.Width - 2 * pad, headH - (int)(4 * k));
         TextRenderer.DrawText(g, title, FTitle, head, TitleColor,
             TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis);
         string cur = AxisFmt(vals[vals.Length - 1]) + (unit.Length > 0 ? " " + unit : "");
@@ -115,10 +126,10 @@ public sealed class ChartPanel : Panel
 
         // ---- область построения: слева колонка шкалы, снизу полоса времени
         var plot = new Rectangle(
-            r.X + 56,
-            r.Y + 30,
-            r.Width - 56 - 12,
-            r.Height - 30 - (showTime ? 24 : 10));
+            r.X + pad + axisW,
+            r.Y + headH + (int)(4 * k),
+            r.Width - pad - axisW - pad - (int)(6 * k),
+            r.Height - headH - (int)(4 * k) - timeH - (int)(4 * k));
         if (plot.Width < 10 || plot.Height < 10) return;
 
         double max = fixedMax;
@@ -136,7 +147,7 @@ public sealed class ChartPanel : Panel
             g.DrawLine(GridPen, plot.Left, y, plot.Right, y);
             string lbl = AxisFmt(max * (1 - i / 4.0));
             TextRenderer.DrawText(g, lbl, FAxis,
-                new Rectangle(r.X + 8, y - 9, plot.X - r.X - 14, 18),
+                new Rectangle(r.X + (int)(4 * k), y - axisH / 2, plot.X - r.X - (int)(8 * k), axisH),
                 AxisColor, TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
         }
 
@@ -162,7 +173,8 @@ public sealed class ChartPanel : Panel
         // ---- время (только у большого графика)
         if (showTime && d.Count > 0)
         {
-            var timeRect = new Rectangle(plot.Left, plot.Bottom + 4, plot.Width, 16);
+            var timeRect = new Rectangle(plot.Left, plot.Bottom + (int)(4 * k), plot.Width,
+                TextRenderer.MeasureText("Ag", FTime).Height);
             TextRenderer.DrawText(g, d[0].Ts.ToString("HH:mm:ss"), FTime, timeRect, AxisColor,
                 TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
             TextRenderer.DrawText(g, d[d.Count - 1].Ts.ToString("HH:mm:ss"), FTime, timeRect, AxisColor,

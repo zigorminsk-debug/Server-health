@@ -245,7 +245,7 @@ public sealed class MainForm : Form
             Margin = new Padding(0)
         };
         right.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        right.RowStyles.Add(new RowStyle(SizeType.Absolute, 104));  // карточки оценок
+        right.RowStyles.Add(new RowStyle(SizeType.AutoSize));       // карточки: высота по содержимому с учётом DPI
         right.RowStyles.Add(new RowStyle(SizeType.Percent, 42));    // живой график
         right.RowStyles.Add(new RowStyle(SizeType.Percent, 58));    // вкладки
 
@@ -715,22 +715,35 @@ public sealed class MainForm : Form
     /// данные берутся напрямую из движка (без промежуточных событий).</summary>
     private void UpdateCards(LivePoint p)
     {
+        // NaN = счётчик недоступен на этой системе — показываем «н/д», а не обманчивый ноль
         double ramMbTotal = _ramGb * 1024.0;
-        double freePct = ramMbTotal > 0 ? p.AvailMb / ramMbTotal * 100.0 : 100.0;
 
-        double cpu = double.IsNaN(p.Cpu) ? 0 : p.Cpu;
-        double avail = double.IsNaN(p.AvailMb) ? 0 : p.AvailMb;
-        double lat = double.IsNaN(p.DiskLatMaxMs) ? 0 : p.DiskLatMaxMs;
-        double net = double.IsNaN(p.NetMbps) ? 0 : p.NetMbps;
+        if (double.IsNaN(p.Cpu))
+            _scCpu.SetLive("н/д", -1, "счётчик CPU недоступен");
+        else
+            _scCpu.SetLive(p.Cpu.ToString("0") + " %", (int)Math.Round(Math.Clamp(p.Cpu, 0, 100)), "загрузка процессора");
 
-        _scCpu.SetLive(cpu.ToString("0") + " %", (int)Math.Round(Math.Clamp(cpu, 0, 100)), "загрузка процессора");
-        _scRam.SetLive((avail / 1024.0).ToString("0.#") + " ГБ",
-            (int)Math.Round(Math.Clamp(100 - freePct, 0, 100)),
-            "свободно из " + _ramGb.ToString("0.#") + " ГБ");
-        _scDisk.SetLive(lat.ToString("0.#") + " мс",
-            (int)Math.Round(Math.Clamp(lat * 2, 0, 100)),
-            "макс. задержка диска");
-        _scNet.SetLive(net.ToString("0") + " Мбит/с", -1, "приём + передача");
+        if (double.IsNaN(p.AvailMb))
+            _scRam.SetLive("н/д", -1, "счётчик памяти недоступен");
+        else
+        {
+            double freePct = ramMbTotal > 0 ? p.AvailMb / ramMbTotal * 100.0 : 100.0;
+            _scRam.SetLive((p.AvailMb / 1024.0).ToString("0.#") + " ГБ",
+                (int)Math.Round(Math.Clamp(100 - freePct, 0, 100)),
+                "свободно из " + _ramGb.ToString("0.#") + " ГБ");
+        }
+
+        if (double.IsNaN(p.DiskLatMaxMs))
+            _scDisk.SetLive("н/д", -1, "счётчики диска недоступны");
+        else
+            _scDisk.SetLive(p.DiskLatMaxMs.ToString("0.##") + " мс",
+                (int)Math.Round(Math.Clamp(p.DiskLatMaxMs * 2, 0, 100)),
+                "макс. задержка диска");
+
+        if (double.IsNaN(p.NetMbps))
+            _scNet.SetLive("н/д", -1, "счётчики сети недоступны");
+        else
+            _scNet.SetLive(p.NetMbps.ToString("0") + " Мбит/с", -1, "приём + передача");
     }
 
     private void OnCycle(CycleResult r)
